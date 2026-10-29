@@ -1,0 +1,19 @@
+[package]
+name = "gdt"
+description = "Godot Development Tools: version manager, addon manager and test runner for Godot."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+godot-dev-tools.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true
