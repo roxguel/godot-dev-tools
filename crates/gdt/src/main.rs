@@ -3,6 +3,7 @@ mod open;
 mod progress;
 mod run;
 mod select;
+mod shim;
 mod verbose;
 
 use std::env;
@@ -82,6 +83,11 @@ enum Command {
     Run(run::RunArgs),
     /// Open a project in the editor with the version it asks for
     Open(run::OpenArgs),
+    /// Manage the `godot` shim, which makes a plain `godot` follow gdt
+    Shim {
+        #[command(subcommand)]
+        command: shim::ShimCommand,
+    },
     /// Show where gdt keeps its files, or open one of them
     Paths {
         /// Open this folder or file in the file manager
@@ -170,9 +176,10 @@ impl fmt::Display for UsageError {
 impl std::error::Error for UsageError {}
 
 /// Ends the process with this exit code and no message: what a program run by
-/// `gdt run` returned, passed on unchanged.
+/// `gdt run` returned, passed on unchanged (a full `i32`: a Windows crash code
+/// such as 0xC0000005 must not be squeezed into a byte).
 #[derive(Debug)]
-struct ExitWith(u8);
+struct ExitWith(i32);
 
 impl fmt::Display for ExitWith {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -183,11 +190,17 @@ impl fmt::Display for ExitWith {
 impl std::error::Error for ExitWith {}
 
 fn main() -> ExitCode {
+    // Started as `godot` (the shim), gdt does nothing but run the right Godot. This
+    // is checked first, before argument parsing, so that every argument reaches Godot.
+    if shim::invoked_as_shim() {
+        std::process::exit(shim::run());
+    }
+
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             if let Some(ExitWith(code)) = error.downcast_ref::<ExitWith>() {
-                return ExitCode::from(*code);
+                std::process::exit(*code);
             }
             eprintln!("Error: {error:#}");
             ExitCode::from(exit_code(&error))
@@ -264,6 +277,7 @@ fn run(cli: Cli) -> Result<()> {
         Some(Command::Engine {
             command: EngineCommand::Shortcut(command),
         }) => engine(command, &ctx),
+        Some(Command::Shim { command }) => shim::command(&command, &ctx),
         Some(Command::Run(args)) => run::run(&args, &ctx),
         Some(Command::Open(args)) => run::open(&args, &ctx),
         Some(Command::Inspect { path }) => inspect(&path),

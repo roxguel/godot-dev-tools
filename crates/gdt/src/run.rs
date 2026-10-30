@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result};
 use clap::Args;
 use godot_dev_tools::{
-    Dirs, Platform, find_console_executable, find_executable, find_project_root,
+    Dirs, Platform, find_console_executable, find_executable, find_project_root, godot_path_arg,
 };
 
 use crate::select::resolve_for;
@@ -53,24 +53,10 @@ fn godot_args(typed: &[String]) -> Vec<String> {
     }
 }
 
-/// The folder given with Godot's `--path` flag, if there is one.
-fn path_flag(args: &[String]) -> Option<PathBuf> {
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        if arg == "--path" {
-            return iter.next().map(PathBuf::from);
-        }
-        if let Some(value) = arg.strip_prefix("--path=") {
-            return Some(PathBuf::from(value));
-        }
-    }
-    None
-}
-
 pub fn run(args: &RunArgs, ctx: &Ctx) -> Result<()> {
     let dirs = Dirs::detect()?;
     let godot = godot_args(&args.args);
-    let start = path_flag(&godot).unwrap_or_else(|| PathBuf::from("."));
+    let start = godot_path_arg(&godot).unwrap_or_else(|| PathBuf::from("."));
     let resolved = resolve_for(ctx, &dirs, &start)?;
 
     let dir = dirs.build_dir(&resolved.build);
@@ -78,13 +64,18 @@ pub fn run(args: &RunArgs, ctx: &Ctx) -> Result<()> {
         .with_context(|| format!("no Godot executable found in {}", dir.display()))?;
     log::debug!("running {} {godot:?}", executable.display());
 
+    // Ctrl+C reaches Godot too, since it shares the terminal; gdt waits for it
+    // and returns its exit code instead of dying first.
+    let _ = ctrlc::set_handler(|| {});
     let status = Command::new(&executable)
         .args(&godot)
         .status()
         .with_context(|| format!("could not start {}", executable.display()))?;
     match status.code() {
         Some(0) => Ok(()),
-        Some(code) => Err(ExitWith(code.clamp(0, 255) as u8).into()),
+        // The code as it is, not squeezed into a byte: a Windows crash code
+        // such as 0xC0000005 must reach the caller unchanged.
+        Some(code) => Err(ExitWith(code).into()),
         // Ended by a signal.
         None => Err(ExitWith(1).into()),
     }
@@ -205,19 +196,5 @@ mod tests {
             godot_args(&v(&["--main-script.gd"])),
             v(&["--main-script.gd"])
         );
-    }
-
-    #[test]
-    fn the_path_flag_is_found() {
-        assert_eq!(
-            path_flag(&v(&["--path", "C:/game", "-s", "x.gd"])),
-            Some(PathBuf::from("C:/game"))
-        );
-        assert_eq!(
-            path_flag(&v(&["--headless", "--path=../g"])),
-            Some(PathBuf::from("../g"))
-        );
-        assert_eq!(path_flag(&v(&["-s", "x.gd"])), None);
-        assert_eq!(path_flag(&v(&["--path"])), None);
     }
 }

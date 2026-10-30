@@ -12,7 +12,7 @@ Write it in Rust, as a Cargo workspace:
 
 - `crates/godot-dev-tools`: library with all logic (versions, addons, tests, project parsing). No printing, no process exit; returns typed results and errors.
 - `crates/gdt`: the CLI binary, a thin layer over the library (argument parsing, output, exit codes).
-- `crates/gdt-shim`: the tiny `godot` shim binary, with minimal dependencies for fast startup.
+- ~~`crates/gdt-shim`: the tiny `godot` shim binary~~ Removed: the shim is `gdt` itself started as `godot` ([ADR 0009](0009-multicall-binary.md)).
 
 ## Consequences
 

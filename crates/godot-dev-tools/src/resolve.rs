@@ -91,6 +91,22 @@ pub fn find_project_root(start: &Path) -> Option<ProjectRoot> {
     })
 }
 
+/// The folder given with Godot's `--path` flag (`--path <dir>` or `--path=<dir>`),
+/// if the arguments have one. This is how a project is found when Godot is
+/// started from another folder.
+pub fn godot_path_arg<S: AsRef<std::ffi::OsStr>>(args: &[S]) -> Option<PathBuf> {
+    let mut iter = args.iter().map(AsRef::as_ref);
+    while let Some(arg) = iter.next() {
+        if arg == "--path" {
+            return iter.next().map(PathBuf::from);
+        }
+        if let Some(value) = arg.to_str().and_then(|a| a.strip_prefix("--path=")) {
+            return Some(PathBuf::from(value));
+        }
+    }
+    None
+}
+
 /// What to resolve.
 pub struct Request<'a> {
     /// The `--godot` flag.
@@ -383,6 +399,27 @@ mod tests {
         let r = resolve(&request, &installed(), &config(Some("4.7.2"))).unwrap();
         assert_eq!(r.source, Source::Default);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_path_argument_is_found() {
+        let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            godot_path_arg(&v(&["--path", "C:/game", "-s", "x.gd"])),
+            Some(PathBuf::from("C:/game"))
+        );
+        assert_eq!(
+            godot_path_arg(&v(&["--headless", "--path=../g"])),
+            Some(PathBuf::from("../g"))
+        );
+        assert_eq!(godot_path_arg(&v(&["-s", "x.gd"])), None);
+        assert_eq!(godot_path_arg(&v(&["--path"])), None);
+        // Works on raw OS arguments too, which is what the shim receives.
+        let os = [
+            std::ffi::OsString::from("--path"),
+            std::ffi::OsString::from("p"),
+        ];
+        assert_eq!(godot_path_arg(&os), Some(PathBuf::from("p")));
     }
 
     #[test]

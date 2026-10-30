@@ -13,7 +13,7 @@ Support both:
 - **Explicit:** `gdt run -- <args>` and `gdt open`. Visible, no `PATH` change.
 - **Shim:** `gdt shim install` provides `godot` (and on request `godot-mono`) in `<data>/gdt/bin`. It resolves the version exactly as `gdt run` does.
 
-The shim is its own small binary (ADR 0001), forwards arguments, environment, stdio and exit code, and does not edit `PATH` by itself.
+The shim forwards arguments, environment, stdio and exit code, and does not edit `PATH` by itself. *(Superseded in part by [ADR 0009](0009-multicall-binary.md): it is not a separate binary but `gdt` itself started as `godot`, and `godot-mono` is not provided.)*
 
 Implementation order: explicit first (M1), shim second (M2).
 

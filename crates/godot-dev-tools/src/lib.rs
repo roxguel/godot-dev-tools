@@ -26,8 +26,8 @@ pub use progress::{NoProgress, Progress};
 pub use project::{EngineFeatures, PROJECT_FILE, ProjectError, find_project_file};
 pub use releases::{Asset, Release, ReleaseError, ResponseCache, Source, fetch_releases};
 pub use resolve::{
-    ProjectRoot, Request, ResolveError, Resolved, find_project_root, pick_installed,
-    removal_candidates, resolve,
+    ProjectRoot, Request, ResolveError, Resolved, find_project_root, godot_path_arg,
+    pick_installed, removal_candidates, resolve,
 };
 pub use storage::{Dirs, Platform, StorageError};
 pub use version::{

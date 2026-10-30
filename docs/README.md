@@ -24,5 +24,6 @@ Every document declares its status at the top: `Draft`, `Accepted`, `Implemented
 | [0004](adr/0004-storage-layout.md) | Per-user storage in the platform's standard directories | Accepted |
 | [0005](adr/0005-version-resolution.md) | How the Godot version for a project is resolved | Accepted |
 | [0006](adr/0006-shim-and-explicit-modes.md) | Two ways to invoke Godot: explicit `gdt run` and a `godot` shim | Accepted |
+| [0009](adr/0009-multicall-binary.md) | One multicall binary; the `godot` shim is `gdt` under another name | Accepted |
 | [0007](adr/0007-command-structure.md) | Commands grouped by area, with shortcuts for the engine | Accepted |
 | [0008](adr/0008-credential-storage.md) | Credentials from the environment or the OS credential store | Accepted |
