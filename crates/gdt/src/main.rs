@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use godot_dev_tools::{Dirs, EngineFeatures};
+use godot_dev_tools::{Dirs, EngineFeatures, find_project_file};
 
 /// Godot Development Tools: version manager, addon manager and test runner for Godot.
 #[derive(Parser)]
@@ -14,9 +14,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show the engine requirements recorded in a project.godot
+    /// Show the engine requirements recorded in a project
     Inspect {
-        /// Path to a project.godot file
+        /// A project.godot file, or a folder inside a project (default: the current folder)
+        #[arg(default_value = ".")]
         path: PathBuf,
     },
     /// Show where gdt keeps its files
@@ -26,12 +27,14 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Inspect { path } => {
-            let features = EngineFeatures::from_file(&path)?;
+            let file = find_project_file(&path)?;
+            let features = EngineFeatures::from_file(&file)?;
+            println!("project: {}", file.display());
             match features.engine {
-                Some((major, minor)) => println!("engine: {major}.{minor}"),
-                None => println!("engine: not recorded"),
+                Some((major, minor)) => println!("engine:  {major}.{minor}"),
+                None => println!("engine:  not recorded"),
             }
-            println!("dotnet: {}", features.dotnet);
+            println!("dotnet:  {}", features.dotnet);
         }
         Command::Paths => {
             let dirs = Dirs::detect()?;

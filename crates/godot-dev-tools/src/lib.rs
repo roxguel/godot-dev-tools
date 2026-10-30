@@ -7,6 +7,6 @@ pub mod project;
 pub mod storage;
 pub mod version;
 
-pub use project::{EngineFeatures, ProjectError};
+pub use project::{EngineFeatures, PROJECT_FILE, ProjectError, find_project_file};
 pub use storage::{Dirs, Platform, StorageError};
 pub use version::{Build, Channel, Flavor, Target, Version, VersionError, VersionSpec};
