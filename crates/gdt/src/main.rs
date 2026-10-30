@@ -1,5 +1,6 @@
 mod list;
 mod open;
+mod path_env;
 mod progress;
 mod run;
 mod select;

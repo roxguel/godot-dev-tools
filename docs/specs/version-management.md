@@ -117,4 +117,12 @@ In shim mode:
 
 `gdt shim status` prints whether the shim is installed and up to date, whether its folder is on `PATH` and at which entry, and which `godot` would run (checking `PATHEXT` on Windows). A `godot` earlier on `PATH` than the shim wins, and on Windows the system `Path` comes before the user `Path`, so `status` is the thing to check. A newer `gdt` leaves the Windows copy old until `gdt shim install` is run again; while a Godot started through the shim is open, Windows will not let the file be replaced, and `gdt` says so.
 
+### `--modify-path`
+
+`gdt` never edits `PATH` on its own. `gdt shim install --modify-path` puts gdt's bin folder **first** on it, and `gdt shim uninstall --modify-path` takes it out again. Both are idempotent and only touch gdt's own entry.
+
+- **Windows:** the user `Path` in the registry (`HKCU\Environment`) is read as stored, with its type (`REG_EXPAND_SZ`) and its unexpanded `%VARIABLES%`, and written back the same way with the folder first. Every other entry is left exactly as written. The previous value is saved first in `path-backup-<seconds>.txt` in gdt's config folder, and if saving fails nothing is written. Windows is then told the environment changed (through a PowerShell call), but a terminal that is already open keeps its old `Path`: Windows Terminal has to be closed completely and opened again. The system `Path` is never touched, and a `godot` there still comes before the user `Path`.
+- **Linux and macOS:** gdt writes a small `env` script in its data folder that adds the folder to `PATH` once, and a block marked `# >>> gdt >>>` ... `# <<< gdt <<<` in the profile that loads it, as `rustup` does. Only that block is ever added or removed; the rest of the file is left byte for byte. Which profile: zsh uses `~/.zshenv` (or `$ZDOTDIR/.zshenv`); bash uses the ones that exist among `~/.bashrc`, `~/.bash_profile` and `~/.profile`, or creates `~/.profile`; fish gets its own file `conf.d/gdt.fish`; any other shell uses `~/.profile`. Removing it looks in all of them. The shell is read from `$SHELL`.
+- A `PATH` value that is not text, or a failure to save the backup, stops the change with an error.
+
 Why a plain `godot --version` follows `gdt use`: only with the shim installed and its folder first on `PATH`. Without it, `gdt run -- --version` shows the same.

@@ -22,3 +22,6 @@ log.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winreg.workspace = true

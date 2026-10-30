@@ -169,9 +169,18 @@ fn start_godot(executable: &Path, args: &[OsString]) -> Result<i32, Failure> {
 #[derive(Subcommand)]
 pub enum ShimCommand {
     /// Put the `godot` shim in gdt's bin folder (or refresh it)
-    Install,
+    Install {
+        /// Also put gdt's bin folder first on your PATH (user Path on Windows, your shell's
+        /// profile on Linux and macOS)
+        #[arg(long)]
+        modify_path: bool,
+    },
     /// Remove the `godot` shim
-    Uninstall,
+    Uninstall {
+        /// Also take gdt's bin folder out of your PATH
+        #[arg(long)]
+        modify_path: bool,
+    },
     /// Show whether the shim is installed, up to date, and the `godot` that runs
     Status,
 }
@@ -179,8 +188,8 @@ pub enum ShimCommand {
 pub fn command(command: &ShimCommand, ctx: &Ctx) -> Result<()> {
     let dirs = Dirs::detect()?;
     match command {
-        ShimCommand::Install => install(&dirs, ctx),
-        ShimCommand::Uninstall => uninstall(&dirs, ctx),
+        ShimCommand::Install { modify_path } => install(&dirs, ctx, *modify_path),
+        ShimCommand::Uninstall { modify_path } => uninstall(&dirs, ctx, *modify_path),
         ShimCommand::Status => status(&dirs),
     }
 }
@@ -189,7 +198,7 @@ fn shim_path(dirs: &Dirs) -> PathBuf {
     dirs.bin_dir().join(shim_file_name())
 }
 
-fn install(dirs: &Dirs, ctx: &Ctx) -> Result<()> {
+fn install(dirs: &Dirs, ctx: &Ctx, modify_path: bool) -> Result<()> {
     let me = env::current_exe().context("could not find the gdt executable")?;
     let target = shim_path(dirs);
     match install_shim(&dirs.bin_dir(), &me)? {
@@ -198,16 +207,107 @@ fn install(dirs: &Dirs, ctx: &Ctx) -> Result<()> {
         }
         Installed::Installed => ctx.info(format!("Installed the shim: {}", target.display())),
     }
-    print_path_report(dirs, ctx);
+    if modify_path {
+        edit_path_variable(dirs, ctx, true)?;
+    } else {
+        print_path_report(dirs, ctx);
+    }
     Ok(())
 }
 
-fn uninstall(dirs: &Dirs, ctx: &Ctx) -> Result<()> {
+fn uninstall(dirs: &Dirs, ctx: &Ctx, modify_path: bool) -> Result<()> {
     let target = shim_path(dirs);
     match fs::remove_file(&target) {
         Ok(()) => ctx.info(format!("Removed {}", target.display())),
         Err(e) if e.kind() == io::ErrorKind::NotFound => ctx.info("The shim is not installed"),
         Err(e) => return Err(locked_or(e, &target)),
+    }
+    if modify_path {
+        edit_path_variable(dirs, ctx, false)?;
+    }
+    Ok(())
+}
+
+/// Puts gdt's bin folder on `PATH` (`add`) or takes it off, for `--modify-path`.
+#[cfg(windows)]
+fn edit_path_variable(dirs: &Dirs, ctx: &Ctx, add: bool) -> Result<()> {
+    use crate::path_env::{Change, windows};
+
+    let bin = dirs.bin_dir();
+    let entry = bin.to_string_lossy().to_string();
+    let backup_dir = dirs.config_dir();
+    let saved = std::cell::RefCell::new(None::<PathBuf>);
+    let backup = |previous: &str| -> io::Result<()> {
+        fs::create_dir_all(&backup_dir)?;
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let file = backup_dir.join(format!("path-backup-{secs}.txt"));
+        fs::write(&file, previous)?;
+        *saved.borrow_mut() = Some(file);
+        Ok(())
+    };
+
+    let change = windows::edit_path(windows::USER_ENVIRONMENT, &entry, add, &backup)
+        .context("could not change your user Path")?;
+    match change {
+        Change::Added | Change::MovedToFront => {
+            ctx.info(format!("Put {entry} first in your user Path"));
+        }
+        Change::AlreadyFirst => ctx.info(format!("{entry} is already first in your user Path")),
+        Change::Removed => ctx.info(format!("Removed {entry} from your user Path")),
+        Change::NotPresent => ctx.info(format!("{entry} is not in your user Path")),
+    }
+    if let Some(file) = saved.borrow().as_ref() {
+        ctx.info(format!(
+            "Your previous Path was saved in {}",
+            file.display()
+        ));
+    }
+    if change.is_change() {
+        windows::notify_environment_changed();
+        ctx.info(
+            "Close Windows Terminal completely and open it again: programs that are already              running keep the old Path.",
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn edit_path_variable(dirs: &Dirs, ctx: &Ctx, add: bool) -> Result<()> {
+    use crate::path_env::{Change, Shell, UnixEnv, modify_unix};
+
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set, so gdt cannot find your shell profile")?;
+    let shell = Shell::from_path(&env::var("SHELL").unwrap_or_default());
+    let unix = UnixEnv {
+        home,
+        shell,
+        zdotdir: env::var_os("ZDOTDIR").map(PathBuf::from),
+        config_home: env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+        data_dir: dirs.data_dir(),
+        bin_dir: dirs.bin_dir(),
+    };
+    let changes = modify_unix(&unix, add).context("could not change your shell profile")?;
+    if changes.is_empty() {
+        ctx.info("gdt was not set up in any shell profile");
+    }
+    for change in &changes {
+        let what = match change.change {
+            Change::Added | Change::MovedToFront => "Added gdt to",
+            Change::AlreadyFirst => "gdt is already set up in",
+            Change::Removed => "Removed gdt from",
+            Change::NotPresent => "gdt is not in",
+        };
+        ctx.info(format!("{what} {}", change.path.display()));
+    }
+    if changes.iter().any(|c| c.change.is_change()) {
+        ctx.info(format!(
+            "Open a new terminal, or run: . '{}'",
+            dirs.data_dir().join("env").display()
+        ));
     }
     Ok(())
 }
@@ -320,9 +420,33 @@ fn print_path_report(dirs: &Dirs, ctx: &Ctx) {
     print_hints(dirs, &report);
 }
 
+/// Whether the user `Path` in the registry already has gdt's bin folder, even
+/// though this terminal (started before) does not see it yet.
+#[cfg(windows)]
+fn registry_has_bin(dirs: &Dirs) -> bool {
+    let bin = dirs.bin_dir().to_string_lossy().to_string();
+    crate::path_env::windows::read_path(crate::path_env::windows::USER_ENVIRONMENT)
+        .map(|value| {
+            let (_, change) = crate::path_env::put_first(&value, &bin);
+            change != crate::path_env::Change::Added
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn registry_has_bin(_dirs: &Dirs) -> bool {
+    false
+}
+
 fn print_hints(dirs: &Dirs, report: &PathReport) {
     let bin = dirs.bin_dir();
-    if report.position.is_none() {
+    if report.position.is_none() && registry_has_bin(dirs) {
+        eprintln!();
+        eprintln!(
+            "{} is already in your user Path, but this terminal started before that.              Close Windows Terminal completely and open it again.",
+            bin.display()
+        );
+    } else if report.position.is_none() {
         eprintln!();
         eprintln!("gdt does not change your PATH. To use the shim, add this folder to it:");
         eprintln!("  {}", bin.display());
