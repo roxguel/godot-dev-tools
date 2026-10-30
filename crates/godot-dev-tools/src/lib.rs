@@ -16,6 +16,7 @@ pub mod releases;
 pub mod resolve;
 pub mod storage;
 pub mod stores;
+pub mod testing;
 pub mod version;
 
 pub use addons::{
@@ -32,7 +33,8 @@ pub use lock::{
     LOCK_FILE, LockError, LockFile, LockedAddon, hash_dir, ignore_lines, set_ignore_block,
 };
 pub use manifest::{
-    AddonEntry, GitMode, MANIFEST_FILE, Manifest, ManifestError, pin, remove_addon, set_addon,
+    AddonEntry, GitMode, MANIFEST_FILE, Manifest, ManifestError, TestConfig, pin, remove_addon,
+    set_addon,
 };
 pub use progress::{NoProgress, Progress};
 pub use project::{EngineFeatures, PROJECT_FILE, ProjectError, find_project_file};
@@ -45,6 +47,10 @@ pub use storage::{Dirs, Platform, StorageError};
 pub use stores::{
     LibraryAsset, SearchHit, StoreAsset, StoreInfo, StoreRelease, library_asset, library_search,
     parse_library_id, pick_release, store_info, store_releases, store_search,
+};
+pub use testing::{
+    Outcome, Runner, Summary, TestError, TestPlan, build_plan, detect_runner, judge, parse_junit,
+    res_path,
 };
 pub use version::{
     Build, Channel, ChannelFilter, ChannelKind, Flavor, Target, Version, VersionError, VersionSpec,

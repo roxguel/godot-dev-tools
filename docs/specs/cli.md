@@ -88,7 +88,7 @@ Channel aliases resolve to the newest published build of that channel: `latest` 
 | `inspect [path]` | `gdt inspect` | Show which engine a project asks for (exists) |
 | `init` | `gdt init` | Create a `gdt.toml` from the engine the project already uses |
 | `sync [--no-dev]` | `gdt sync`, `gdt sync --no-dev` | Make a fresh clone ready: install the engine and the addons from the project files (like `npm ci`). With `--no-dev`, skip the development addons |
-| `test [filter]` | `gdt test`, `gdt test tests/test_x.gd` | Run the project's test suites headless. See [testing.md](testing.md) |
+| `test [paths]` | `gdt test`, `gdt test test/unit`, `gdt test test/test_x.gd --report junit.xml` | Run the project's tests headless with the right Godot: GUT, gdUnit4 or a script of your own, found from the installed addons or `[test]` in `gdt.toml`. Imports a fresh clone first, and judges the result from the JUnit report rather than the exit code alone. Exits 0 when all pass, 10 when any fails. See [testing.md](testing.md) |
 
 ## Addons
 

@@ -8,7 +8,7 @@ Status: Draft. Remove an item when it is answered, and record the answer in a sp
 2. **Godot upgrade path.** What is official and scriptable: `--convert-3to4` (3 to 4 only), and for 4.x to 4.y, opening headless with `--import` / `--quit` to re-import. What breaks, and what a safe `gdt upgrade` must do (git cleanliness check, backup, dry run).
 3. **Godot trademark policy, full text.** Only excerpts were reviewed. Read the whole policy at <https://godot.foundation/policies-and-procedures/trademark-policy> and ask the Foundation in writing if anything about the name is unclear.
 4. **Asset Store with an account.** The API is public and documented (see [authentication.md](specs/authentication.md)). Still to verify with an account: where a user creates an API key, whether a purchased asset's `download_url` is only returned with the bearer token, and how a paid asset behaves without one. Also whether the Asset Library's REST API is still served, and its response shape.
-5. **Test runners' command lines.** GUT and gdUnit4 headless entry points and report formats, per version.
+5. **gdUnit4 run for real.** Its command line and exit handling are taken from its own `runtest.sh` and source, but it has not been run: read its JUnit report (written under the `-rd` folder in a numbered subfolder) and confirm the exit codes and that `--ignoreHeadlessMode` is enough in CI.
 6. **Windows shim.** A small separate `.exe` shim versus a `.cmd` file; behavior when stdin/stdout are attached to a console, signal and exit code forwarding.
 7. **.NET flavor.** Needs the .NET SDK on the machine; decide what `gdt doctor` checks and what `gdt install` says about it.
 

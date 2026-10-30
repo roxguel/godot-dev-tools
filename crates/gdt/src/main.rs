@@ -6,6 +6,7 @@ mod progress;
 mod run;
 mod select;
 mod shim;
+mod test;
 mod verbose;
 
 use std::env;
@@ -19,8 +20,8 @@ use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
     AddonError, Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient,
     HttpError, InstallRequest, Platform, Progress, ReleaseError, ResolveError, ResponseCache,
-    Source, UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
-    install_build,
+    Source, TestError, UreqClient, Version, VersionError, VersionSpec, fetch_releases,
+    find_project_file, install_build,
 };
 use serde_json::json;
 
@@ -92,6 +93,8 @@ enum Command {
     },
     /// Make a fresh clone ready: the engine the project asks for, then its addons
     Sync(addon::SyncArgs),
+    /// Run the project's tests headless (GUT, gdUnit4 or a script)
+    Test(test::TestArgs),
     /// Manage the `godot` shim, which makes a plain `godot` follow gdt
     Shim {
         #[command(subcommand)]
@@ -253,6 +256,9 @@ fn exit_code(error: &anyhow::Error) -> u8 {
             _ => 1,
         };
     }
+    if error.downcast_ref::<TestError>().is_some() {
+        return 2;
+    }
     if error.downcast_ref::<HttpError>().is_some() {
         return 3;
     }
@@ -310,6 +316,7 @@ fn run(cli: Cli) -> Result<()> {
         }) => engine(command, &ctx),
         Some(Command::Addon { command }) => addon::run(&command, &ctx),
         Some(Command::Sync(args)) => addon::sync(&args, &ctx),
+        Some(Command::Test(args)) => test::test(&args, &ctx),
         Some(Command::Shim { command }) => shim::command(&command, &ctx),
         Some(Command::Run(args)) => run::run(&args, &ctx),
         Some(Command::Open(args)) => run::open(&args, &ctx),
