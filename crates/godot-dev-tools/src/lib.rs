@@ -31,5 +31,5 @@ pub use resolve::{
 };
 pub use storage::{Dirs, Platform, StorageError};
 pub use version::{
-    Build, Channel, ChannelKind, Flavor, Target, Version, VersionError, VersionSpec,
+    Build, Channel, ChannelFilter, ChannelKind, Flavor, Target, Version, VersionError, VersionSpec,
 };

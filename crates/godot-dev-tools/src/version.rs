@@ -193,6 +193,48 @@ impl Channel {
     }
 }
 
+/// Which release channels to show in a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChannelFilter {
+    pub stable: bool,
+    pub rc: bool,
+    pub beta: bool,
+    pub dev: bool,
+}
+
+impl ChannelFilter {
+    /// Every channel.
+    pub const ALL: Self = Self {
+        stable: true,
+        rc: true,
+        beta: true,
+        dev: true,
+    };
+
+    /// Stable releases only.
+    pub const STABLE: Self = Self {
+        stable: true,
+        rc: false,
+        beta: false,
+        dev: false,
+    };
+
+    /// Whether a release of `channel` passes the filter.
+    pub fn matches(&self, channel: &Channel) -> bool {
+        match channel {
+            Channel::Stable => self.stable,
+            Channel::Rc(_) => self.rc,
+            Channel::Beta(_) => self.beta,
+            Channel::Dev(_) => self.dev,
+        }
+    }
+
+    /// Whether any pre-release channel is included.
+    pub fn includes_pre_releases(&self) -> bool {
+        self.rc || self.beta || self.dev
+    }
+}
+
 /// A version as typed by a user: `latest`, `4.7`, `4.7.1`, `4.8-rc1`, each with an
 /// optional `-mono` suffix. Pre-releases are only ever chosen when named exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,6 +518,22 @@ mod tests {
         assert_eq!(spec("5").pick(&all), Some(v("5.0-stable")));
         assert_eq!(spec("6").pick(&all), None);
         assert!(!spec("4").needs_pre_releases());
+    }
+
+    #[test]
+    fn channel_filters_match_their_channels() {
+        let stable = Version::from_tag("4.7.2-stable").unwrap().channel;
+        let rc = Version::from_tag("4.8-rc1").unwrap().channel;
+        let beta = Version::from_tag("4.8-beta2").unwrap().channel;
+        assert!(ChannelFilter::STABLE.matches(&stable));
+        assert!(!ChannelFilter::STABLE.matches(&rc));
+        assert!(!ChannelFilter::STABLE.includes_pre_releases());
+        assert!(ChannelFilter::ALL.matches(&beta) && ChannelFilter::ALL.includes_pre_releases());
+        let only_beta = ChannelFilter {
+            beta: true,
+            ..ChannelFilter::default()
+        };
+        assert!(only_beta.matches(&beta) && !only_beta.matches(&rc) && !only_beta.matches(&stable));
     }
 
     #[test]

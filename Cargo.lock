@@ -280,6 +280,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "console",
  "godot-dev-tools",
  "indicatif",
  "log",

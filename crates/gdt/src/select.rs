@@ -21,7 +21,7 @@ pub struct UninstallArgs {
     /// build of it is installed (add -mono for the .NET build)
     spec: String,
     /// The .NET build (same as the -mono suffix)
-    #[arg(long)]
+    #[arg(short, long)]
     mono: bool,
 }
 
@@ -31,10 +31,10 @@ pub struct UseArgs {
     /// the current default
     spec: Option<String>,
     /// The .NET build (same as the -mono suffix)
-    #[arg(long)]
+    #[arg(short, long)]
     mono: bool,
     /// Print machine-readable JSON
-    #[arg(long)]
+    #[arg(short, long)]
     json: bool,
 }
 
@@ -43,7 +43,7 @@ pub struct PinArgs {
     /// The build this project uses: 4.7.2, 4.7, latest... Stored as the exact version
     spec: String,
     /// The .NET build (same as the -mono suffix)
-    #[arg(long)]
+    #[arg(short, long)]
     mono: bool,
     /// Ignore the cached release list and ask GitHub again
     #[arg(long)]
@@ -56,7 +56,7 @@ pub struct WhichArgs {
     #[arg(default_value = ".")]
     path: PathBuf,
     /// Show the editor executable instead of the one that prints to a terminal
-    #[arg(long)]
+    #[arg(short, long)]
     editor: bool,
 }
 
@@ -225,6 +225,37 @@ pub fn uninstall(args: &UninstallArgs, ctx: &Ctx) -> Result<()> {
         config.default_engine = None;
         config.save(&path)?;
         ctx.info("It was the default engine; choose another with `gdt use <version>`");
+    }
+    Ok(())
+}
+
+#[derive(Args)]
+pub struct CurrentArgs {
+    /// A folder inside a project (default: the current folder)
+    #[arg(default_value = ".")]
+    path: PathBuf,
+    /// Print machine-readable JSON
+    #[arg(short, long)]
+    json: bool,
+}
+
+/// Prints the build in use here, ready for scripts: `gdt current`.
+pub fn current(args: &CurrentArgs, ctx: &Ctx) -> Result<()> {
+    let dirs = Dirs::detect()?;
+    let resolved = resolve_for(ctx, &dirs, &args.path)?;
+    if args.json {
+        println!(
+            "{}",
+            json!({
+                "id": resolved.build.to_string(),
+                "version": resolved.build.version.to_string(),
+                "mono": resolved.build.flavor == Flavor::Dotnet,
+                "from": resolved.source.to_string(),
+            })
+        );
+    } else {
+        println!("{}", resolved.build);
+        ctx.info(format!("(from {})", resolved.source));
     }
     Ok(())
 }
