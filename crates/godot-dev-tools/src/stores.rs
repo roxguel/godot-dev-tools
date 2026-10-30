@@ -298,9 +298,12 @@ pub fn library_search(
         "{LIBRARY_API}/asset?type=addon&max_results=20&filter={}",
         percent_encode(query)
     );
-    if let Some(version) = godot_version {
-        url.push_str(&format!("&godot_version={}", percent_encode(version)));
-    }
+    // Without a Godot version the Library answers with nothing at all; `any`
+    // is its word for "every version".
+    url.push_str(&format!(
+        "&godot_version={}",
+        percent_encode(godot_version.unwrap_or("any"))
+    ));
     let value = json(http, &url, query)?;
     let results = value
         .get("result")
@@ -514,6 +517,10 @@ mod tests {
         assert_eq!(hits[0].id, "library:5385");
         assert_eq!(hits[0].detail.as_deref(), Some("1.3.2, Godot 4.6"));
         assert!(fake.seen.borrow()[0].contains("godot_version=4.7"));
+
+        // With no Godot version asked for, it must still send one (`any`).
+        library_search(&fake, "dialogue", None).unwrap();
+        assert!(fake.seen.borrow()[1].contains("godot_version=any"));
     }
 
     #[test]

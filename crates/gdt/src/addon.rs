@@ -455,7 +455,7 @@ fn fetch(
 
 pub fn run(command: &AddonCommand, ctx: &Ctx) -> Result<()> {
     if let AddonCommand::Search(args) = command {
-        return search(args);
+        return search(args, ctx);
     }
     let project = Project::find()?;
     match command {
@@ -824,7 +824,7 @@ fn update(project: &Project, ctx: &Ctx, args: &UpdateArgs) -> Result<()> {
 
 /// `gdt addon search`: works anywhere; inside a project it prefers what works
 /// with the project's Godot.
-fn search(args: &SearchArgs) -> Result<()> {
+fn search(args: &SearchArgs, ctx: &Ctx) -> Result<()> {
     let http = http_client();
     let engine = Project::find().ok().and_then(|p| p.engine_version());
     let hits: Vec<SearchHit> = if args.library {
@@ -849,9 +849,15 @@ fn search(args: &SearchArgs) -> Result<()> {
             })
             .collect();
         println!("{}", json!({ "results": items }));
+    } else if ctx.quiet {
+        for hit in &hits {
+            println!("{}", hit.id);
+        }
     } else if hits.is_empty() {
         println!("Nothing found for `{}`.", args.text);
     } else {
+        let last = if args.library { "VERSION" } else { "PRICE" };
+        println!("{:<40} {:<32} {:<14} {last}", "ASSET", "NAME", "LICENSE");
         for hit in &hits {
             let extra = hit.detail.clone().unwrap_or_else(|| price(hit));
             println!(
