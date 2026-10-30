@@ -11,11 +11,17 @@ A version is `MAJOR.MINOR[.PATCH]` plus an optional channel and a flavor:
 | `4.7.1` | Stable 4.7.1, standard build |
 | `4.7` | Latest installed (or latest available, when installing) stable 4.7.x |
 | `4.7.0` | Exactly 4.7.0. Godot names it `4.7-stable` (no patch); `gdt` shows it as `4.7` |
-| `4.7.1-mono` | The .NET build (`--mono` is the same as the suffix) |
+| `4.7.1-mono` | The .NET build. The suffix is canonical; `--mono` on a command means the same |
+| `beta`, `rc`, `dev` | The newest published build of that channel (for example `4.8-beta2`) |
+| `pre` | The newest pre-release of any channel |
 | `4.8-rc1`, `4.8-beta2`, `4.8-dev3` | Pre-releases; never selected by a loose `4.8` while stable exists |
 | `latest` | Latest stable |
 
-Stable is the default channel. Pre-releases must be named explicitly.
+Stable is the default channel. Pre-releases must be named explicitly, either exactly (`4.8-rc1`) or with a channel alias (`beta`, `rc`, `dev`, `pre`).
+
+Aliases (`latest`, `beta`, `rc`, `dev`, `pre`) are resolved when the command runs. `gdt use` and `gdt pin` store the **concrete** version they resolved to, never the alias, so a pinned project stays reproducible.
+
+No Godot build comes with `gdt` itself. The first `gdt install` makes its build the global default when none is set.
 
 ## Sources
 
@@ -81,14 +87,16 @@ The project root is the nearest ancestor of the working directory containing `pr
 
 ```toml
 [godot]
-version = "4.7.1"   # or "4.7", "4.8-rc1"
-mono = false
+version = "4.7.1"        # or "4.7", "4.8-rc1", "4.7.1-mono" for the .NET build
 ```
+
+There is a single `version` field; the flavor is the `-mono` suffix. The project file is `gdt.toml` only (no JSON variant), so there is never a conflict between two manifests.
 
 ## Opening and running
 
-- `gdt open <path>`: resolve for the project, start the editor (`--editor --path <project>`), detach from the terminal, return immediately.
-- `gdt run -- <args>`: resolve, run in the foreground in the current directory, forward stdin/stdout/stderr and the exit code.
+- `gdt open <path>`: resolve for the project, start the editor (`--editor --path <project>`), detach from the terminal, return immediately. Outside a project, or with `--manager`, it starts Godot's project manager with the global default build.
+- `gdt run -- <args>`: resolve, run in the foreground in the current directory, forward stdin/stdout/stderr and the exit code. `gdt run script.gd` is the shortcut for `--headless -s script.gd` (the script must extend `SceneTree` or `MainLoop`).
+- `gdt engine info`: the executable, the version, the flavor, the editor settings folder (per user, shared by builds of the same major version, to verify), the project's `.godot/` folder, and whether the build is self-contained (a `_sc_` file next to the executable makes Godot keep its data beside it; to verify).
 
 ## The shim
 

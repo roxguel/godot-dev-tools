@@ -5,6 +5,8 @@
 //! with one root.
 
 use std::ffi::OsString;
+use std::fs;
+use std::io;
 use std::path::PathBuf;
 
 use crate::version::Build;
@@ -124,6 +126,23 @@ impl Dirs {
     /// The folder of one build, for example `versions/4.7.1-mono`.
     pub fn build_dir(&self, build: &Build) -> PathBuf {
         self.versions_dir().join(build.to_string())
+    }
+
+    /// The builds installed under `versions/`, oldest first. Folders whose names
+    /// are not a build (stray files, partial installs) are ignored.
+    pub fn installed_builds(&self) -> io::Result<Vec<Build>> {
+        let entries = match fs::read_dir(self.versions_dir()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut builds: Vec<Build> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| Build::from_dir_name(e.file_name().to_str()?).ok())
+            .collect();
+        builds.sort();
+        Ok(builds)
     }
 
     /// Downloaded archives; safe to delete.
@@ -261,6 +280,36 @@ mod tests {
             Dirs::resolve(Platform::Windows, env(&[("APPDATA", "x")])),
             Err(StorageError::MissingEnv("LOCALAPPDATA"))
         );
+    }
+
+    #[test]
+    fn installed_builds_lists_valid_folders_only() {
+        let root = std::env::temp_dir().join(format!("gdt-test-{}-installed", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let d = Dirs::resolve(
+            Platform::Linux,
+            env(&[("GDT_HOME", root.to_str().unwrap())]),
+        )
+        .unwrap();
+        assert_eq!(
+            d.installed_builds().unwrap(),
+            vec![],
+            "no versions folder yet"
+        );
+
+        for name in ["4.7.1", "4.7.1-mono", "4.6.3", "4.8-beta2", "junk", "3.6.3"] {
+            fs::create_dir_all(d.versions_dir().join(name)).unwrap();
+        }
+        fs::write(d.versions_dir().join("4.9"), "a file, not a folder").unwrap();
+
+        let names: Vec<String> = d
+            .installed_builds()
+            .unwrap()
+            .iter()
+            .map(|b| b.to_string())
+            .collect();
+        assert_eq!(names, ["4.6.3", "4.7.1", "4.7.1-mono", "4.8-beta2"]);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

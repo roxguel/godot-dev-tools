@@ -82,6 +82,15 @@ impl Version {
         })
     }
 
+    /// Parses the short form shown by [`Display`](fmt::Display): `4.7.1`, `4.7`
+    /// (that is 4.7.0) or `4.8-beta2`. This is how build folders are named.
+    pub fn from_display(text: &str) -> Result<Self, VersionError> {
+        if text.contains('-') {
+            return Self::from_tag(text);
+        }
+        Self::from_tag(&format!("{text}-stable"))
+    }
+
     /// The GitHub release tag, for example `4.7.1-stable`.
     pub fn tag(&self) -> String {
         format!("{}-{}", self.numbers(), self.channel)
@@ -121,6 +130,20 @@ pub enum Flavor {
 pub struct Build {
     pub version: Version,
     pub flavor: Flavor,
+}
+
+impl Build {
+    /// Parses a folder name such as `4.7.1`, `4.7.1-mono` or `4.8-beta2-mono`.
+    pub fn from_dir_name(name: &str) -> Result<Self, VersionError> {
+        let (text, flavor) = match name.strip_suffix("-mono") {
+            Some(rest) => (rest, Flavor::Dotnet),
+            None => (name, Flavor::Standard),
+        };
+        Ok(Self {
+            version: Version::from_display(text)?,
+            flavor,
+        })
+    }
 }
 
 impl fmt::Display for Build {
@@ -300,6 +323,19 @@ mod tests {
             flavor: Flavor::Standard,
         };
         assert_eq!(b.to_string(), "4.8-beta2");
+    }
+
+    #[test]
+    fn folder_names_round_trip() {
+        for name in ["4.7", "4.7.1", "4.7.1-mono", "4.8-beta2", "4.8-rc1-mono"] {
+            assert_eq!(Build::from_dir_name(name).unwrap().to_string(), name);
+        }
+        assert_eq!(
+            Build::from_dir_name("4.7").unwrap().version,
+            v("4.7-stable")
+        );
+        assert!(Build::from_dir_name("notes").is_err());
+        assert!(Build::from_dir_name("3.6.3").is_err());
     }
 
     #[test]
