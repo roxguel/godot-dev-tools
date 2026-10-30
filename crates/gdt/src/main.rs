@@ -1,3 +1,4 @@
+mod addon;
 mod list;
 mod open;
 mod path_env;
@@ -84,6 +85,13 @@ enum Command {
     Run(run::RunArgs),
     /// Open a project in the editor with the version it asks for
     Open(run::OpenArgs),
+    /// Manage the addons of a project
+    Addon {
+        #[command(subcommand)]
+        command: addon::AddonCommand,
+    },
+    /// Make a fresh clone ready: the engine the project asks for, then its addons
+    Sync(addon::SyncArgs),
     /// Manage the `godot` shim, which makes a plain `godot` follow gdt
     Shim {
         #[command(subcommand)]
@@ -145,6 +153,18 @@ struct InstallArgs {
     /// Print machine-readable JSON
     #[arg(short, long)]
     json: bool,
+}
+
+impl InstallArgs {
+    /// What `gdt sync` does for the engine: install what the project asks for.
+    fn for_project() -> Self {
+        Self {
+            spec: None,
+            mono: false,
+            refresh: false,
+            json: false,
+        }
+    }
 }
 
 /// Settings shared by every command.
@@ -278,6 +298,8 @@ fn run(cli: Cli) -> Result<()> {
         Some(Command::Engine {
             command: EngineCommand::Shortcut(command),
         }) => engine(command, &ctx),
+        Some(Command::Addon { command }) => addon::run(&command, &ctx),
+        Some(Command::Sync(args)) => addon::sync(&args, &ctx),
         Some(Command::Shim { command }) => shim::command(&command, &ctx),
         Some(Command::Run(args)) => run::run(&args, &ctx),
         Some(Command::Open(args)) => run::open(&args, &ctx),
