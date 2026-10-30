@@ -28,6 +28,9 @@ pub enum EngineError {
     /// Nothing published matches what was asked for.
     #[error("no Godot release matches `{0}`; see `gdt list --remote --all`")]
     VersionNotFound(String),
+    /// The build asked for is not installed.
+    #[error("Godot {0} is not installed; run `gdt install {0}`")]
+    NotInstalled(String),
     /// The release has no build for this machine.
     #[error("this release has no build for {0}")]
     NoBuild(String),
@@ -349,6 +352,32 @@ pub fn find_executable(dir: &Path, platform: Platform) -> Option<PathBuf> {
     None
 }
 
+/// The executable to run scripts and see output with. On Windows the editor is a
+/// GUI program that never prints to a terminal, so Godot ships a `_console.exe`
+/// twin next to it; elsewhere it is the same executable as the editor.
+pub fn find_console_executable(dir: &Path, platform: Platform) -> Option<PathBuf> {
+    let editor = find_executable(dir, platform)?;
+    if platform != Platform::Windows {
+        return Some(editor);
+    }
+    let console = fs::read_dir(editor.parent()?)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("_console.exe"))
+        });
+    Some(console.unwrap_or(editor))
+}
+
+/// Deletes an installed build.
+pub fn uninstall_build(dirs: &Dirs, build: &Build) -> Result<(), EngineError> {
+    let dir = dirs.build_dir(build);
+    fs::remove_dir_all(&dir).map_err(io_err(format!("could not remove {}", dir.display())))
+}
+
 fn is_editor_executable(path: &Path, platform: Platform) -> bool {
     let name = path
         .file_name()
@@ -602,6 +631,18 @@ mod tests {
         fs::create_dir_all(nested.join("Godot_mono")).unwrap();
         fs::write(nested.join("Godot_mono").join("Godot_mono_win64.exe"), b"").unwrap();
         assert!(find_executable(&nested, Platform::Windows).is_some());
+
+        let console = find_console_executable(&dir, Platform::Windows).unwrap();
+        assert!(
+            console.ends_with("Godot_v4.7.2-stable_win64_console.exe"),
+            "{console:?}"
+        );
+        // Without a console twin, or off Windows, the editor is used.
+        let only_editor = find_console_executable(&nested, Platform::Windows).unwrap();
+        assert!(
+            only_editor.ends_with("Godot_mono_win64.exe"),
+            "{only_editor:?}"
+        );
         assert_eq!(
             find_executable(&scratch("find-win-empty"), Platform::Windows),
             None

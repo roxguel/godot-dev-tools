@@ -15,7 +15,7 @@ A top-level word that belongs to another group fails with a hint: `gdt add 4.0` 
 
 ## Global flags
 
-`--progress <auto|rich|plain|none>`, `-q`/`--quiet`, `-v`/`--verbose`, `--color <auto|always|never>`, `--json` (commands that print data), `--godot <version>` (override the resolved engine for this command).
+`--progress <auto|rich|plain|none>`, `-q`/`--quiet`, `-v`/`--verbose`, `--color <auto|always|never>`, `--json` (commands that print data), `--godot <version>` (use this installed build for this command, whatever the project or the default say; it must be installed).
 
 `-v` prints diagnostics on stderr, prefixed `[debug]`: what is being resolved, URLs requested and their HTTP status, cache hits, the asset chosen, checksums, folders used. `-vv` adds what the underlying libraries log (HTTP and TLS). Progress switches to plain lines while `-v` is on, so the diagnostics stay readable. Tokens and other secrets are never logged. The library reports diagnostics through the `log` crate and the CLI decides whether to show them.
 
@@ -64,11 +64,11 @@ A *version spec* is `latest`, `beta`, `rc`, `dev`, `pre`, `4.7`, `4.7.2`, `4.8-r
 | Command | Example | What it does |
 |---|---|---|
 | `install [spec]` (**shortcut**) | `gdt install 4.7.2`, `gdt install latest-mono`, `gdt install beta`, `gdt install` | Download, verify and install a build. With no spec, installs what the project asks for. The first build installed becomes the global default if there is none |
-| `uninstall <spec>` (**shortcut**) | `gdt uninstall 4.6.3` | Remove an installed build |
+| `uninstall <spec>` (**shortcut**) | `gdt uninstall 4.6.3` | Remove an installed build. The spec must name it exactly (or a `MAJOR.MINOR` line with only one build installed); aliases such as `latest` are refused so nothing is deleted by a moving name. If it was the default, the default is cleared |
 | `list` / `ls` (**shortcut**) | `gdt ls`, `gdt ls --remote --all --json` | Installed builds; `--remote` lists what GitHub offers; `--all` adds pre-releases; `--refresh` skips the cache |
-| `use <spec>` (**shortcut**) | `gdt use 4.7.2` | Set the global default. Stores the concrete version, never an alias |
-| `pin <spec>` (**shortcut**) | `gdt pin latest` | Write the build this project uses into `gdt.toml`. Stores the concrete version |
-| `which` | `gdt which` | Print the path of the executable that would run here (for scripts) |
+| `use [spec]` (**shortcut**) | `gdt use 4.7.2`, `gdt use` | Choose the default among the **installed** builds (`gdt use latest` is the newest installed). Stores the concrete version, never an alias. Without a spec, shows the current default. It changes what `gdt run` and `gdt open` use outside a project; to make a plain `godot` command follow it, install the shim (`gdt shim install`) |
+| `pin <spec>` (**shortcut**) | `gdt pin latest` | Write the build this project uses into `gdt.toml` (`[godot] version`). Looks the spec up on GitHub when it is not exact, and stores the concrete version. Says if that build is not installed yet |
+| `which [path]` (**shortcut**) | `gdt which`, `gdt which --editor` | Print the executable that would run here, for scripts. On Windows it is the console one unless `--editor` is given |
 | `info [spec]` | `gdt engine info` | Executable, version, flavor, the editor settings folder, the project data folder and whether the build is self-contained |
 | `upgrade [spec]` | `gdt upgrade 4.8` | Move a project to another engine version using Godot's own tools (to be researched, milestone M6) |
 
@@ -107,7 +107,7 @@ See [addons.md](addons.md). Always under `gdt addon`.
 | `shim install` / `shim uninstall` | `gdt shim install --modify-path` | Install or remove the `godot` shim; `--modify-path` also puts it on `PATH` |
 | `config get\|set\|list` | `gdt config set auto_install true` | Read or change user settings |
 | `cache clean` | `gdt cache clean` | Delete downloaded archives and cached release lists |
-| `paths` | `gdt paths` | Where `gdt` keeps its files (exists) |
+| `paths [--open <what>]` | `gdt paths`, `gdt paths --open data`, `gdt paths --open config-file` | Where `gdt` keeps its files; with `--open`, show one in the file manager. `<what>` is `data`, `config`, `config-file` (selected in its folder), `versions`, `cache` or `bin`. A file that does not exist yet opens its folder; a missing folder is an error (exists) |
 | `doctor` | `gdt doctor` | Check the environment: `PATH`, shim, .NET, permissions |
 | `self-update` | `gdt self-update` | Update `gdt` |
 | `completions <shell>` | `gdt completions powershell` | Generate shell completions |
