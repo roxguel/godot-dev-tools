@@ -15,6 +15,7 @@ godot-dev-tools.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 indicatif.workspace = true
+ctrlc.workspace = true
 console.workspace = true
 serde_json.workspace = true
 log.workspace = true
