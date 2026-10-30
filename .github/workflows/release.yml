@@ -1,0 +1,153 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds gdt for six targets, checks that the tag
+# matches the version in Cargo.toml, and publishes a GitHub release with the
+# archives, a SHA256SUMS file and build provenance attestations.
+#
+# A pull request that changes this file, or a manual run, builds everything and
+# publishes nothing: that is how the workflow itself is tested.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+# Read-only by default; only the publishing job gets more.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Third-party actions are pinned to a full commit SHA (the tag is in the comment).
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, smoke: true }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm, smoke: true }
+          # Static (musl) Linux binaries run on any distribution, old or new.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, smoke: true, musl: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, smoke: true, musl: true }
+          - { target: aarch64-apple-darwin, os: macos-latest, smoke: true }
+          # Built on an Apple silicon runner, so it is not run here.
+          - { target: x86_64-apple-darwin, os: macos-latest, smoke: false }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install the musl C toolchain
+        if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Check the version
+        id: version
+        shell: bash
+        run: |
+          version=$(cargo pkgid -p gdt | sed 's/.*[#@]//')
+          echo "gdt is version $version"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: cargo build --release --locked -p gdt --target ${{ matrix.target }}
+
+      - name: Check that the Linux binary is static
+        if: matrix.musl
+        run: |
+          file "target/${{ matrix.target }}/release/gdt"
+          file "target/${{ matrix.target }}/release/gdt" | grep -q "statically linked"
+
+      - name: Smoke test
+        if: matrix.smoke
+        shell: bash
+        run: |
+          exe="target/${{ matrix.target }}/release/gdt"
+          [[ "${{ matrix.target }}" == *windows* ]] && exe="$exe.exe"
+          out=$("$exe" --version)
+          echo "$out"
+          [[ "$out" == "gdt ${{ steps.version.outputs.version }}" ]]
+          "$exe" paths > /dev/null
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "gdt-v${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          New-Item -ItemType Directory "dist/$name" -Force | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/gdt.exe", LICENSE-MIT, LICENSE-APACHE, README.md "dist/$name"
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+          Remove-Item "dist/$name" -Recurse
+
+      - name: Package (Linux and macOS)
+        if: runner.os != 'Windows'
+        run: |
+          name="gdt-v${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/gdt" LICENSE-MIT LICENSE-APACHE README.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          rm -r "dist/$name"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gdt-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestations
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gdt-*
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum gdt-v* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/gdt-v*
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          # A tag such as v0.2.0-rc1 is a pre-release.
+          [[ "$GITHUB_REF_NAME" == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "gdt ${GITHUB_REF_NAME#v}" \
+            "${flags[@]}"
