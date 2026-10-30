@@ -26,6 +26,10 @@ version = "2.1"
 [addons.other]
 url = "https://example.com/other-1.0.zip"
 sha256 = "..."                  # required for url sources
+
+[addons.gdunit4]
+store = "mikeschulze/gdunit4"
+dev = true                      # needed to work on the project, not shipped: see "Development addons"
 ```
 
 `gdt.lock` records the exact resolved source: commit SHA for GitHub, release id and download details for stores, plus the content hash of the extracted files for every source. `gdt addon install` reproduces the lock exactly and fails if a hash does not match.
@@ -57,6 +61,27 @@ Unlike `node_modules`, `addons/` is part of how Godot opens a project, so there 
 | `ignore` | The whole `addons/` folder is ignored; everything must come from `gdt` | Projects whose addons are all declared in `gdt.toml`. `gdt` warns when `addons/` holds a folder it does not manage, because that folder would not be in Git |
 
 In `managed` and `ignore`, `gdt sync` or `gdt addon install` restores the addons: a fresh clone needs the network and that command before the editor opens cleanly. `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given.
+
+## Development addons
+
+Like Node's `devDependencies` or Cargo's `[dev-dependencies]`: an addon marked `dev = true` is needed to work on the project (a test framework such as GUT or gdUnit4, an editor-only tool) but not by the game that ships.
+
+```toml
+[addons.gut]
+github = "bitwes/Gut"
+tag = "v9.4.0"
+dev = true
+```
+
+What the flag does:
+
+- `gdt sync --no-dev` and `gdt addon install --no-dev` skip them, so a release job installs only what the game needs. Everything else installs them by default.
+- `gdt test` needs its runner: if the runner's addon is `dev` and was skipped, it says so instead of failing obscurely.
+- `gdt addon export-filter` prints the `exclude_filter` entries for the development addons (for example `addons/gut/*`) to paste into an export preset.
+
+Why this is more than Godot's own export filters: a preset's `exclude_filter` is the only thing that keeps an addon out of an export, and it is written by hand per preset. The default export mode includes every resource in the project, so a test framework ships unless someone excluded it. Declaring the addon once as `dev` is the single source for both "do not install it in release jobs" and "do not ship it".
+
+`gdt` does not rewrite `export_presets.cfg` by default: the editor rewrites that file whenever it saves, so edits from outside are easily lost. A `--write` option may come later, to be used with the editor closed.
 
 ## Installation rules
 

@@ -9,6 +9,7 @@ A version is `MAJOR.MINOR[.PATCH]` plus an optional channel and a flavor:
 | Text | Meaning |
 |---|---|
 | `4.7.1` | Stable 4.7.1, standard build |
+| `4` | The newest stable release of that major version. Redundant while 4 is the newest major, and it keeps working when a newer one appears |
 | `4.7` | Latest installed (or latest available, when installing) stable 4.7.x |
 | `4.7.0` | Exactly 4.7.0. Godot names it `4.7-stable` (no patch); `gdt` shows it as `4.7` |
 | `4.7.1-mono` | The .NET build. The suffix is canonical; `--mono` on a command means the same |

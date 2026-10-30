@@ -59,7 +59,7 @@ Progress comes in three styles, chosen with `--progress <auto|rich|plain|none>` 
 
 See [version-management.md](version-management.md). Each command below works as `gdt engine <command>`; the ones marked **shortcut** also work as `gdt <command>`.
 
-A *version spec* is `latest`, `beta`, `rc`, `dev`, `pre`, `4.7`, `4.7.2`, `4.8-rc1`, each with an optional `-mono` suffix (`gdt install 4.7.2-mono`). `--mono` is accepted as the same thing.
+A *version spec* is `latest`, `beta`, `rc`, `dev`, `pre`, `4`, `4.7`, `4.7.2`, `4.8-rc1`, each with an optional `-mono` suffix (`gdt install 4.7.2-mono`). `--mono` is accepted as the same thing.
 
 | Command | Example | What it does |
 |---|---|---|
@@ -82,7 +82,7 @@ Channel aliases resolve to the newest published build of that channel: `latest` 
 | `open [path]` | `gdt open`, `gdt open C:\games\cozy`, `gdt open --manager` | Open the editor on a project. Outside a project, or with `--manager`, opens Godot's project manager with the default build |
 | `inspect [path]` | `gdt inspect` | Show which engine a project asks for (exists) |
 | `init` | `gdt init` | Create a `gdt.toml` from the engine the project already uses |
-| `sync` | `gdt sync` | Make a fresh clone ready: install the engine and the addons from the project files (like `npm ci`) |
+| `sync [--no-dev]` | `gdt sync`, `gdt sync --no-dev` | Make a fresh clone ready: install the engine and the addons from the project files (like `npm ci`). With `--no-dev`, skip the development addons |
 | `test [filter]` | `gdt test`, `gdt test tests/test_x.gd` | Run the project's test suites headless. See [testing.md](testing.md) |
 
 ## Addons
@@ -91,8 +91,8 @@ See [addons.md](addons.md). Always under `gdt addon`.
 
 | Command | Example | What it does |
 |---|---|---|
-| `add <source>` | `gdt addon add publisher/asset`, `gdt addon add github:bitwes/Gut@v9.4.0`, `gdt addon add library:1234` | Add an addon to `gdt.toml`, install it and update the lockfile |
-| `install [source]` | `gdt addon install`, `gdt addon install --locked` | With no source, install exactly what the lockfile says (`--locked` fails instead of changing the lockfile). With a source, the same as `add` |
+| `add <source>` | `gdt addon add publisher/asset`, `gdt addon add github:bitwes/Gut@v9.4.0 --dev`, `gdt addon add library:1234` | Add an addon to `gdt.toml`, install it and update the lockfile. `--dev` marks it as a development addon |
+| `install [source]` | `gdt addon install`, `gdt addon install --locked --no-dev` | With no source, install exactly what the lockfile says (`--locked` fails instead of changing the lockfile; `--no-dev` skips development addons). With a source, the same as `add` |
 | `remove` / `rm` `<name>` | `gdt addon rm gut` | Remove from the manifest, the lockfile and `addons/` |
 | `update [name]` | `gdt addon update` | Look for newer versions and rewrite the lockfile |
 | `list` / `ls` | `gdt addon ls` | Installed addons and where they came from |

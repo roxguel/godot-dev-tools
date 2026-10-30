@@ -84,7 +84,7 @@ enum EngineCommand {
 
 #[derive(Args)]
 struct InstallArgs {
-    /// What to install: 4.7.2, 4.7, latest, beta, rc, dev, pre, 4.8-rc1 (add -mono for .NET).
+    /// What to install: 4, 4.7, 4.7.2, latest, beta, rc, dev, pre, 4.8-rc1 (add -mono for .NET).
     /// Without it, installs what the current project asks for
     spec: Option<String>,
     /// Install the .NET build (same as the -mono suffix)
