@@ -1,5 +1,6 @@
 mod open;
 mod progress;
+mod run;
 mod select;
 mod verbose;
 
@@ -63,6 +64,10 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Run Godot with the right version: a GDScript file, or any Godot arguments
+    Run(run::RunArgs),
+    /// Open a project in the editor with the version it asks for
+    Open(run::OpenArgs),
     /// Show where gdt keeps its files, or open one of them
     Paths {
         /// Open this folder or file in the file manager
@@ -164,10 +169,26 @@ impl fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
+/// Ends the process with this exit code and no message: what a program run by
+/// `gdt run` returned, passed on unchanged.
+#[derive(Debug)]
+struct ExitWith(u8);
+
+impl fmt::Display for ExitWith {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "exited with code {}", self.0)
+    }
+}
+
+impl std::error::Error for ExitWith {}
+
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            if let Some(ExitWith(code)) = error.downcast_ref::<ExitWith>() {
+                return ExitCode::from(*code);
+            }
             eprintln!("Error: {error:#}");
             ExitCode::from(exit_code(&error))
         }
@@ -238,6 +259,8 @@ fn run(cli: Cli) -> Result<()> {
         Some(Command::Engine {
             command: EngineCommand::Shortcut(command),
         }) => engine(command, &ctx),
+        Some(Command::Run(args)) => run::run(&args, &ctx),
+        Some(Command::Open(args)) => run::open(&args, &ctx),
         Some(Command::Inspect { path }) => inspect(&path),
         Some(Command::Paths { open }) => paths(open, &ctx),
         Some(Command::Add { .. }) => Err(UsageError(
