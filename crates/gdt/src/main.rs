@@ -1,5 +1,6 @@
 mod open;
 mod progress;
+mod run;
 mod select;
 mod verbose;
 
@@ -13,9 +14,9 @@ use anyhow::Result;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
     Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient, HttpError,
-    InstallRequest, Platform, Progress, Release, ReleaseError, ResolveError, ResponseCache, Source,
-    UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
-    install_build,
+    InstallRequest, Platform, Progress, Release, ReleaseError, ResolveError, Resolved,
+    ResponseCache, Source, UreqClient, Version, VersionError, VersionSpec, fetch_releases,
+    find_project_file, install_build,
 };
 use serde_json::json;
 
@@ -63,6 +64,10 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Run Godot with the right version: a GDScript file, or any Godot arguments
+    Run(run::RunArgs),
+    /// Open a project in the editor with the version it asks for
+    Open(run::OpenArgs),
     /// Show where gdt keeps its files, or open one of them
     Paths {
         /// Open this folder or file in the file manager
@@ -164,10 +169,26 @@ impl fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
+/// Ends the process with this exit code and no message: what a program run by
+/// `gdt run` returned, passed on unchanged.
+#[derive(Debug)]
+struct ExitWith(u8);
+
+impl fmt::Display for ExitWith {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "exited with code {}", self.0)
+    }
+}
+
+impl std::error::Error for ExitWith {}
+
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
+            if let Some(ExitWith(code)) = error.downcast_ref::<ExitWith>() {
+                return ExitCode::from(*code);
+            }
             eprintln!("Error: {error:#}");
             ExitCode::from(exit_code(&error))
         }
@@ -238,6 +259,8 @@ fn run(cli: Cli) -> Result<()> {
         Some(Command::Engine {
             command: EngineCommand::Shortcut(command),
         }) => engine(command, &ctx),
+        Some(Command::Run(args)) => run::run(&args, &ctx),
+        Some(Command::Open(args)) => run::open(&args, &ctx),
         Some(Command::Inspect { path }) => inspect(&path),
         Some(Command::Paths { open }) => paths(open, &ctx),
         Some(Command::Add { .. }) => Err(UsageError(
@@ -303,36 +326,122 @@ fn release_cache(dirs: &Dirs) -> ResponseCache {
     ResponseCache::new(dirs.api_cache_dir(), RELEASE_CACHE_TTL)
 }
 
-fn list(args: &ListArgs, ctx: &Ctx) -> Result<()> {
-    let dirs = Dirs::detect()?;
-    let installed = dirs.installed_builds()?;
-    if args.remote {
-        list_remote(args, ctx, &dirs, &installed)
-    } else {
-        list_installed(args, &installed)
+/// Which builds are the default and which one applies in the current folder.
+struct Marks {
+    default: Option<Build>,
+    in_use: Option<Resolved>,
+}
+
+impl Marks {
+    fn detect(ctx: &Ctx, dirs: &Dirs) -> Result<Self> {
+        let default = Config::load(&dirs.config_file())?.default_build();
+        let in_use = match select::resolve_for(ctx, dirs, Path::new(".")) {
+            Ok(resolved) => Some(resolved),
+            Err(error) => {
+                // A project that asks for a build that is not installed is worth saying.
+                if matches!(
+                    error.downcast_ref::<ResolveError>(),
+                    Some(ResolveError::NotInstalled { .. })
+                ) {
+                    ctx.info(format!("Note: {error}"));
+                }
+                None
+            }
+        };
+        Ok(Self { default, in_use })
+    }
+
+    fn is_default(&self, build: &Build) -> bool {
+        self.default == Some(*build)
+    }
+
+    fn is_in_use(&self, build: &Build) -> bool {
+        self.in_use.as_ref().is_some_and(|r| r.build == *build)
+    }
+
+    /// `in use here, default`, for the builds that are either.
+    fn labels(&self, build: &Build) -> Vec<&'static str> {
+        let mut labels = Vec::new();
+        if self.is_in_use(build) {
+            labels.push("in use here");
+        }
+        if self.is_default(build) {
+            labels.push("default");
+        }
+        labels
+    }
+
+    fn describe_in_use(&self, ctx: &Ctx) {
+        if let Some(resolved) = &self.in_use {
+            ctx.info(format!(
+                "In use here: Godot {} (from {})",
+                resolved.build, resolved.source
+            ));
+        }
+    }
+
+    fn json(&self) -> serde_json::Value {
+        json!({
+            "default": self.default.map(|b| b.to_string()),
+            "in_use": self.in_use.as_ref().map(|r| r.build.to_string()),
+            "in_use_from": self.in_use.as_ref().map(|r| r.source.to_string()),
+        })
     }
 }
 
-fn list_installed(args: &ListArgs, installed: &[Build]) -> Result<()> {
+fn list(args: &ListArgs, ctx: &Ctx) -> Result<()> {
+    let dirs = Dirs::detect()?;
+    let installed = dirs.installed_builds()?;
+    let marks = Marks::detect(ctx, &dirs)?;
+    if args.remote {
+        list_remote(args, ctx, &dirs, &installed, &marks)
+    } else {
+        list_installed(args, ctx, &installed, &marks)
+    }
+}
+
+fn list_installed(args: &ListArgs, ctx: &Ctx, installed: &[Build], marks: &Marks) -> Result<()> {
     if args.json {
         let versions: Vec<_> = installed
             .iter()
-            .map(|b| json!({ "id": b.to_string(), "version": b.version.to_string(), "mono": b.flavor == Flavor::Dotnet }))
+            .map(|b| {
+                json!({
+                    "id": b.to_string(),
+                    "version": b.version.to_string(),
+                    "mono": b.flavor == Flavor::Dotnet,
+                    "default": marks.is_default(b),
+                    "in_use": marks.is_in_use(b),
+                })
+            })
             .collect();
-        println!("{}", json!({ "versions": versions }));
+        let mut out = marks.json();
+        out["versions"] = versions.into();
+        println!("{out}");
     } else if installed.is_empty() {
         println!(
             "No Godot builds are installed yet. See `gdt list --remote` for what is available."
         );
     } else {
         for build in installed {
-            println!("{build}");
+            let labels = marks.labels(build);
+            if labels.is_empty() {
+                println!("{build}");
+            } else {
+                println!("{:<14}{}", build.to_string(), labels.join(", "));
+            }
         }
+        marks.describe_in_use(ctx);
     }
     Ok(())
 }
 
-fn list_remote(args: &ListArgs, ctx: &Ctx, dirs: &Dirs, installed: &[Build]) -> Result<()> {
+fn list_remote(
+    args: &ListArgs,
+    ctx: &Ctx,
+    dirs: &Dirs,
+    installed: &[Build],
+    marks: &Marks,
+) -> Result<()> {
     let http = http_client();
     let cache = release_cache(dirs);
 
@@ -361,32 +470,49 @@ fn list_remote(args: &ListArgs, ctx: &Ctx, dirs: &Dirs, installed: &[Build]) -> 
 
     if args.json {
         let versions: Vec<_> = releases.iter().map(|r| remote_json(r, installed)).collect();
-        println!("{}", json!({ "versions": versions }));
+        let mut out = marks.json();
+        out["versions"] = versions.into();
+        println!("{out}");
     } else {
         for release in &releases {
-            let flavors = installed_flavors(&release.version, installed);
-            if flavors.is_empty() {
+            let here: Vec<String> = installed
+                .iter()
+                .filter(|b| b.version == release.version)
+                .map(|b| {
+                    let name = flavor_name(b.flavor);
+                    match marks.labels(b).as_slice() {
+                        [] => name.to_string(),
+                        labels => format!("{name} ({})", labels.join(", ")),
+                    }
+                })
+                .collect();
+            if here.is_empty() {
                 println!("{}", release.version);
             } else {
                 println!(
                     "{:<12} installed: {}",
                     release.version.to_string(),
-                    flavors.join(", ")
+                    here.join(", ")
                 );
             }
         }
+        marks.describe_in_use(ctx);
     }
     Ok(())
+}
+
+fn flavor_name(flavor: Flavor) -> &'static str {
+    match flavor {
+        Flavor::Standard => "standard",
+        Flavor::Dotnet => "mono",
+    }
 }
 
 fn installed_flavors(version: &Version, installed: &[Build]) -> Vec<&'static str> {
     installed
         .iter()
         .filter(|b| b.version == *version)
-        .map(|b| match b.flavor {
-            Flavor::Standard => "standard",
-            Flavor::Dotnet => "mono",
-        })
+        .map(|b| flavor_name(b.flavor))
         .collect()
 }
 
