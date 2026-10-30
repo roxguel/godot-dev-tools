@@ -163,6 +163,8 @@ pub enum Target {
     Latest,
     /// The newest stable release of one `MAJOR.MINOR` line.
     Line { major: u32, minor: u32 },
+    /// The newest stable release of one major version (`4`).
+    Major(u32),
     /// One exact release, including pre-releases.
     Exact(Version),
     /// The newest published build of one pre-release channel (`beta`, `rc`, `dev`).
@@ -211,6 +213,12 @@ impl VersionSpec {
                 .filter(|v| v.major == major && v.minor == minor)
                 .max()
                 .copied(),
+            Target::Major(major) => available
+                .into_iter()
+                .filter(stable)
+                .filter(|v| v.major == major)
+                .max()
+                .copied(),
             Target::Exact(wanted) => available.into_iter().find(|v| **v == wanted).copied(),
             Target::Channel(kind) => available
                 .into_iter()
@@ -229,7 +237,7 @@ impl VersionSpec {
     /// repository (`godot-builds`) rather than the stable one.
     pub fn needs_pre_releases(&self) -> bool {
         match self.target {
-            Target::Latest | Target::Line { .. } => false,
+            Target::Latest | Target::Line { .. } | Target::Major(_) => false,
             Target::Exact(v) => v.channel != Channel::Stable,
             Target::Channel(_) | Target::Pre => true,
         }
@@ -260,6 +268,11 @@ impl FromStr for VersionSpec {
             Target::Channel(ChannelKind::Dev)
         } else if text == "pre" {
             Target::Pre
+        } else if let Ok(major) = text.parse::<u32>() {
+            if major < 4 {
+                return Err(VersionError::UnsupportedMajor(major));
+            }
+            Target::Major(major)
         } else if text.contains('-') {
             Target::Exact(Version::from_tag(text)?)
         } else {
@@ -438,6 +451,31 @@ mod tests {
         assert_eq!(spec("pre").pick(&all), Some(v("4.8-rc1")));
         assert_eq!(spec("beta-mono").flavor, Flavor::Dotnet);
         assert_eq!(spec("rc").pick(&[v("4.7.2-stable")]), None);
+    }
+
+    #[test]
+    fn a_major_number_picks_the_newest_stable_of_that_major() {
+        assert_eq!(spec("4").target, Target::Major(4));
+        assert_eq!(spec("4-mono").flavor, Flavor::Dotnet);
+        assert_eq!(
+            "3".parse::<VersionSpec>(),
+            Err(VersionError::UnsupportedMajor(3))
+        );
+        assert_eq!(
+            "0".parse::<VersionSpec>(),
+            Err(VersionError::UnsupportedMajor(0))
+        );
+
+        let all = [
+            v("4.6.3-stable"),
+            v("4.7.2-stable"),
+            v("4.8-beta2"),
+            v("5.0-stable"),
+        ];
+        assert_eq!(spec("4").pick(&all), Some(v("4.7.2-stable")));
+        assert_eq!(spec("5").pick(&all), Some(v("5.0-stable")));
+        assert_eq!(spec("6").pick(&all), None);
+        assert!(!spec("4").needs_pre_releases());
     }
 
     #[test]
