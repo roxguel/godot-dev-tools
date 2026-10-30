@@ -78,8 +78,8 @@ Channel aliases resolve to the newest published build of that channel: `latest` 
 
 | Command | Example | What it does |
 |---|---|---|
-| `run [script.gd] [-- args]` | `gdt run tools/x.gd`, `gdt run -- --path . -s tools/x.gd` | Run Godot with the resolved version from any folder. With a `.gd` file it is the same as `godot --headless -s <file>` (like `node index.js`); after `--`, arguments go to Godot untouched. Output and exit code are forwarded |
-| `open [path]` | `gdt open`, `gdt open C:\games\cozy`, `gdt open --manager` | Open the editor on a project. Outside a project, or with `--manager`, opens Godot's project manager with the default build |
+| `run [script.gd] [args]` | `gdt run tools/x.gd one two`, `gdt run -- --path . -s tools/x.gd` | Run Godot with the resolved version from any folder, with its output and exit code passed through (like `node index.js`). A first argument ending in `.gd` is a script: it runs as `godot --headless -s <file> -- <args>`, and the script reads its arguments with `OS.get_cmdline_user_args()`. Anything else is given to Godot untouched, so `gdt run -- --path <dir> ...` works from any folder: `--path` also decides which project's version is used. On Windows it runs the `_console.exe` build, the only one that prints to a terminal. Checked with 4.7.2: output, script arguments and exit code 3 from `quit(3)` |
+| `open [path]` | `gdt open`, `gdt open C:\games\cozy`, `gdt open --manager` | Open the editor on a project. Outside a project, or with `--manager`, opens Godot's project manager with the default build. It returns at once and the editor keeps running when the terminal closes (detached on Windows; elsewhere it follows the terminal's own rules). A path that is not inside a project is an error |
 | `inspect [path]` | `gdt inspect` | Show which engine a project asks for (exists) |
 | `init` | `gdt init` | Create a `gdt.toml` from the engine the project already uses |
 | `sync [--no-dev]` | `gdt sync`, `gdt sync --no-dev` | Make a fresh clone ready: install the engine and the addons from the project files (like `npm ci`). With `--no-dev`, skip the development addons |
