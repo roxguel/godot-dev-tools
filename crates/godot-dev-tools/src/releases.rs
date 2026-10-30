@@ -217,7 +217,10 @@ pub fn fetch_releases(
 
         let cached = cache.filter(|_| !refresh).and_then(|c| c.read(&current));
         let data = match cached {
-            Some(data) => data,
+            Some(data) => {
+                log::debug!("release list served from the cache: {current}");
+                data
+            }
             None => {
                 let response = http.get(&current)?;
                 let data = CachedPage {
@@ -322,6 +325,15 @@ mod tests {
                 });
             }
             Ok(pages.remove(0))
+        }
+
+        fn download(
+            &self,
+            url: &str,
+            _sink: &mut dyn std::io::Write,
+            _on_chunk: &mut dyn FnMut(Option<u64>, u64),
+        ) -> Result<(), HttpError> {
+            unreachable!("release lists are never downloaded as files: {url}")
         }
     }
 

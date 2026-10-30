@@ -1,15 +1,18 @@
 mod progress;
+mod verbose;
 
 use std::env;
-use std::path::PathBuf;
+use std::fmt;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Result;
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
-    Build, Dirs, EngineFeatures, Flavor, HttpError, Progress, Release, ReleaseError, ResponseCache,
-    Source, UreqClient, Version, fetch_releases, find_project_file,
+    Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient, HttpError,
+    InstallRequest, Platform, Progress, Release, ReleaseError, ResponseCache, Source, UreqClient,
+    Version, VersionError, VersionSpec, fetch_releases, find_project_file, install_build,
 };
 use serde_json::json;
 
@@ -30,12 +33,23 @@ struct Cli {
     #[arg(short, long, global = true)]
     quiet: bool,
 
+    /// Show diagnostic details on stderr (-vv for network and TLS details too)
+    #[arg(short, long, global = true, action = ArgAction::Count)]
+    verbose: u8,
+
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    #[command(flatten)]
+    Shortcut(EngineShortcut),
+    /// Manage Godot builds
+    Engine {
+        #[command(subcommand)]
+        command: EngineCommand,
+    },
     /// Show the engine requirements recorded in a project
     Inspect {
         /// A project.godot file, or a folder inside a project (default: the current folder)
@@ -44,8 +58,44 @@ enum Command {
     },
     /// Show where gdt keeps its files
     Paths,
+    /// There is no top-level `add`
+    #[command(hide = true)]
+    Add {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        rest: Vec<String>,
+    },
+}
+
+/// The engine commands that also work without the `engine` prefix.
+#[derive(Subcommand)]
+enum EngineShortcut {
+    /// Download, verify and install a Godot build
+    Install(InstallArgs),
     /// List Godot builds: installed ones, or with --remote the ones you can install
+    #[command(visible_alias = "ls")]
     List(ListArgs),
+}
+
+#[derive(Subcommand)]
+enum EngineCommand {
+    #[command(flatten)]
+    Shortcut(EngineShortcut),
+}
+
+#[derive(Args)]
+struct InstallArgs {
+    /// What to install: 4.7.2, 4.7, latest, beta, rc, dev, pre, 4.8-rc1 (add -mono for .NET).
+    /// Without it, installs what the current project asks for
+    spec: Option<String>,
+    /// Install the .NET build (same as the -mono suffix)
+    #[arg(long)]
+    mono: bool,
+    /// Ignore the cached release list and ask GitHub again
+    #[arg(long)]
+    refresh: bool,
+    /// Print machine-readable JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -64,6 +114,33 @@ struct ListArgs {
     json: bool,
 }
 
+/// Settings shared by every command.
+struct Ctx {
+    style: Style,
+    quiet: bool,
+}
+
+impl Ctx {
+    /// An informational message, hidden by --quiet.
+    fn info(&self, message: impl fmt::Display) {
+        if !self.quiet {
+            eprintln!("{message}");
+        }
+    }
+}
+
+/// A mistake in how the command was written.
+#[derive(Debug)]
+struct UsageError(String);
+
+impl fmt::Display for UsageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UsageError {}
+
 fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -76,24 +153,75 @@ fn main() -> ExitCode {
 
 /// The documented exit code for an error (see docs/specs/cli.md).
 fn exit_code(error: &anyhow::Error) -> u8 {
-    let network = error.downcast_ref::<HttpError>().is_some()
-        || matches!(
-            error.downcast_ref::<ReleaseError>(),
-            Some(ReleaseError::Http(_))
-        );
-    if network { 3 } else { 1 }
-}
-
-fn run(cli: Cli) -> Result<()> {
-    let style = Style::resolve(cli.progress, cli.quiet);
-    match cli.command {
-        Command::Inspect { path } => inspect(&path),
-        Command::Paths => paths(),
-        Command::List(args) => list(&args, style),
+    if error.downcast_ref::<UsageError>().is_some()
+        || error.downcast_ref::<VersionError>().is_some()
+    {
+        return 2;
+    }
+    if error.downcast_ref::<HttpError>().is_some() {
+        return 3;
+    }
+    if let Some(error) = error.downcast_ref::<ReleaseError>() {
+        return if matches!(error, ReleaseError::Http(_)) {
+            3
+        } else {
+            1
+        };
+    }
+    match error.downcast_ref::<EngineError>() {
+        Some(EngineError::Http(_)) => 3,
+        Some(EngineError::VersionNotFound(_) | EngineError::NoBuild(_)) => 4,
+        Some(
+            EngineError::ChecksumMismatch { .. }
+            | EngineError::NoChecksum(_)
+            | EngineError::NoChecksumFile,
+        ) => 5,
+        _ => 1,
     }
 }
 
-fn inspect(path: &std::path::Path) -> Result<()> {
+fn run(cli: Cli) -> Result<()> {
+    verbose::init(cli.verbose);
+    // Redrawn bars would be torn apart by the log lines, so -v uses plain lines.
+    let arg = if cli.verbose > 0 && cli.progress == ProgressArg::Auto {
+        ProgressArg::Plain
+    } else {
+        cli.progress
+    };
+    let ctx = Ctx {
+        style: Style::resolve(arg, cli.quiet),
+        quiet: cli.quiet,
+    };
+
+    match cli.command {
+        None => {
+            Cli::command().print_help()?;
+            println!();
+            Ok(())
+        }
+        Some(Command::Shortcut(command)) => engine(command, &ctx),
+        Some(Command::Engine {
+            command: EngineCommand::Shortcut(command),
+        }) => engine(command, &ctx),
+        Some(Command::Inspect { path }) => inspect(&path),
+        Some(Command::Paths) => paths(),
+        Some(Command::Add { .. }) => Err(UsageError(
+            "there is no `gdt add`; use `gdt addon add <source>` to add an addon, \
+             or `gdt install <version>` to install a Godot build"
+                .into(),
+        )
+        .into()),
+    }
+}
+
+fn engine(command: EngineShortcut, ctx: &Ctx) -> Result<()> {
+    match command {
+        EngineShortcut::Install(args) => install(&args, ctx),
+        EngineShortcut::List(args) => list(&args, ctx),
+    }
+}
+
+fn inspect(path: &Path) -> Result<()> {
     let file = find_project_file(path)?;
     let features = EngineFeatures::from_file(&file)?;
     println!("project: {}", file.display());
@@ -115,11 +243,27 @@ fn paths() -> Result<()> {
     Ok(())
 }
 
-fn list(args: &ListArgs, style: Style) -> Result<()> {
+/// The HTTP client, with the GitHub token from the environment if there is one.
+fn http_client() -> UreqClient {
+    let token = ["GITHUB_TOKEN", "GH_TOKEN"]
+        .iter()
+        .find_map(|name| env::var(name).ok().filter(|v| !v.is_empty()));
+    log::debug!(
+        "GitHub token: {}",
+        if token.is_some() { "set" } else { "not set" }
+    );
+    UreqClient::new(&format!("gdt/{}", env!("CARGO_PKG_VERSION")), token)
+}
+
+fn release_cache(dirs: &Dirs) -> ResponseCache {
+    ResponseCache::new(dirs.api_cache_dir(), RELEASE_CACHE_TTL)
+}
+
+fn list(args: &ListArgs, ctx: &Ctx) -> Result<()> {
     let dirs = Dirs::detect()?;
     let installed = dirs.installed_builds()?;
     if args.remote {
-        list_remote(args, style, &dirs, &installed)
+        list_remote(args, ctx, &dirs, &installed)
     } else {
         list_installed(args, &installed)
     }
@@ -144,14 +288,11 @@ fn list_installed(args: &ListArgs, installed: &[Build]) -> Result<()> {
     Ok(())
 }
 
-fn list_remote(args: &ListArgs, style: Style, dirs: &Dirs, installed: &[Build]) -> Result<()> {
-    let token = ["GITHUB_TOKEN", "GH_TOKEN"]
-        .iter()
-        .find_map(|name| env::var(name).ok().filter(|v| !v.is_empty()));
-    let http = UreqClient::new(&format!("gdt/{}", env!("CARGO_PKG_VERSION")), token);
-    let cache = ResponseCache::new(dirs.cache_dir().join("api"), RELEASE_CACHE_TTL);
+fn list_remote(args: &ListArgs, ctx: &Ctx, dirs: &Dirs, installed: &[Build]) -> Result<()> {
+    let http = http_client();
+    let cache = release_cache(dirs);
 
-    let mut progress = CliProgress::new(style);
+    let mut progress = CliProgress::new(ctx.style);
     progress.begin("Fetching Godot releases", None);
     let mut releases = fetch_releases(
         &http,
@@ -213,4 +354,103 @@ fn remote_json(release: &Release, installed: &[Build]) -> serde_json::Value {
         "source": release.source.repo(),
         "installed": installed_flavors(&release.version, installed),
     })
+}
+
+/// The version a project asks for in its `project.godot`, as a spec.
+fn project_spec(ctx: &Ctx) -> Result<VersionSpec> {
+    let file = find_project_file(Path::new("."))?;
+    let features = EngineFeatures::from_file(&file)?;
+    let Some((major, minor)) = features.engine else {
+        return Err(UsageError(format!(
+            "{} does not record an engine version; say which one to install, for example `gdt install latest`",
+            file.display()
+        ))
+        .into());
+    };
+    ctx.info(format!("{} asks for Godot {major}.{minor}", file.display()));
+    let flavor = if features.dotnet { "-mono" } else { "" };
+    Ok(format!("{major}.{minor}{flavor}").parse()?)
+}
+
+fn install(args: &InstallArgs, ctx: &Ctx) -> Result<()> {
+    let dirs = Dirs::detect()?;
+    let mut spec = match &args.spec {
+        Some(text) => text.parse::<VersionSpec>()?,
+        None => project_spec(ctx)?,
+    };
+    if args.mono {
+        spec.flavor = Flavor::Dotnet;
+    }
+    let wanted = args
+        .spec
+        .clone()
+        .unwrap_or_else(|| "the project's version".into());
+    log::debug!("resolving {wanted}: {spec:?}");
+
+    let http = http_client();
+    let cache = release_cache(&dirs);
+    let mut progress = CliProgress::new(ctx.style);
+
+    progress.begin("Fetching Godot releases", None);
+    let source = if spec.needs_pre_releases() {
+        Source::PreReleases
+    } else {
+        Source::Stable
+    };
+    let releases = fetch_releases(&http, Some(&cache), source, args.refresh, &mut progress)?;
+    progress.finish(&format!("Found {} Godot releases", releases.len()));
+
+    let versions: Vec<Version> = releases.iter().map(|r| r.version).collect();
+    let picked = spec
+        .pick(&versions)
+        .ok_or_else(|| EngineError::VersionNotFound(wanted.clone()))?;
+    log::debug!("{wanted} resolves to {picked}");
+    let release = releases
+        .iter()
+        .find(|r| r.version == picked)
+        .ok_or(EngineError::VersionNotFound(wanted))?;
+
+    let installed = install_build(
+        &http as &dyn HttpClient,
+        &dirs,
+        &InstallRequest {
+            release,
+            flavor: spec.flavor,
+            platform: Platform::current(),
+            arch: Arch::current(),
+        },
+        &mut progress,
+    )?;
+    if installed.already_installed {
+        ctx.info(format!("Godot {} is already installed", installed.build));
+    }
+
+    let made_default = make_default_if_none(&dirs, &installed.build, ctx)?;
+    if args.json {
+        println!(
+            "{}",
+            json!({
+                "id": installed.build.to_string(),
+                "version": installed.build.version.to_string(),
+                "path": installed.dir,
+                "executable": installed.executable,
+                "already_installed": installed.already_installed,
+                "made_default": made_default,
+            })
+        );
+    }
+    Ok(())
+}
+
+/// The first build installed becomes the default, so the tool works at once.
+fn make_default_if_none(dirs: &Dirs, build: &Build, ctx: &Ctx) -> Result<bool> {
+    let path = dirs.config_file();
+    let mut config = Config::load(&path)?;
+    if config.default_build().is_some() {
+        return Ok(false);
+    }
+    config.default_engine = Some(build.to_string());
+    config.save(&path)?;
+    ctx.info(format!("Godot {build} is now the default engine"));
+    Ok(true)
 }

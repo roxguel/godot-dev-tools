@@ -150,6 +150,11 @@ impl Dirs {
         self.data.join("cache").join("downloads")
     }
 
+    /// Cached answers from GitHub and the stores; safe to delete.
+    pub fn api_cache_dir(&self) -> PathBuf {
+        self.data.join("cache").join("api")
+    }
+
     /// Where the shims and the `gdt` link live.
     pub fn bin_dir(&self) -> PathBuf {
         self.data.join("bin")
@@ -327,6 +332,10 @@ mod tests {
         assert_eq!(
             d.cache_dir(),
             PathBuf::from("/g").join("cache").join("downloads")
+        );
+        assert_eq!(
+            d.api_cache_dir(),
+            PathBuf::from("/g").join("cache").join("api")
         );
         assert_eq!(d.bin_dir(), PathBuf::from("/g").join("bin"));
         assert_eq!(d.config_file(), PathBuf::from("/g").join("config.toml"));

@@ -41,6 +41,32 @@ Rules:
 - It is never printed, never logged (also not with `--verbose`) and never written to `gdt.toml`, `gdt.lock` or the project folder.
 - Prefer tokens with an expiry (`lifespan`) and a description such as `gdt on <machine>`.
 
+## Using it in CI
+
+CI platforms hand secrets to a job as environment variables, and `GDT_STORE_TOKEN` is the first place `gdt` looks, so a pipeline never needs `gdt auth login`:
+
+```yaml
+# GitHub Actions
+- run: gdt sync
+  env:
+    GDT_STORE_TOKEN: ${{ secrets.GDT_STORE_TOKEN }}
+    GH_TOKEN: ${{ secrets.ADDONS_READ_TOKEN }}   # only if an addon comes from a private repository
+```
+
+`gdt auth login store --with-token` is for local scripts and for machines where a credential store exists. A CI runner has none, so using it there would only fall back to a file for no benefit.
+
+Good practice for the token: a dedicated key with an expiry, stored as an encrypted secret, never echoed. Secrets are not passed to workflows triggered by pull requests from forks, so those runs install free assets only.
+
+## Private GitHub repositories
+
+A `github:` source in a private repository needs a token with read access to it. `gdt` reads `GH_TOKEN` or `GITHUB_TOKEN` and sends it only to `api.github.com`; the repository is fetched as an archive through the API, so no `git` credentials are involved.
+
+- The `GITHUB_TOKEN` that GitHub Actions provides only reaches the repository running the workflow, **not other private repositories**. For those, create:
+  - a **fine-grained personal access token** limited to the repositories needed, with the single permission *Contents: read*, and store it as a secret; or, better for organizations,
+  - a **GitHub App** installation token (short-lived), minted in the workflow.
+- Public repositories need no token; one only raises the rate limit.
+- Other hosts (GitLab, a private server) are reached with `git`, using whatever credentials the machine already has (SSH key, credential helper, deploy key).
+
 ## Behavior
 
 - Free assets never need a token; `gdt addon add` works signed out.
