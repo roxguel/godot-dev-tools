@@ -1,3 +1,4 @@
+mod list;
 mod open;
 mod progress;
 mod run;
@@ -14,9 +15,9 @@ use anyhow::Result;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
     Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient, HttpError,
-    InstallRequest, Platform, Progress, Release, ReleaseError, ResolveError, Resolved,
-    ResponseCache, Source, UreqClient, Version, VersionError, VersionSpec, fetch_releases,
-    find_project_file, install_build,
+    InstallRequest, Platform, Progress, ReleaseError, ResolveError, ResponseCache, Source,
+    UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
+    install_build,
 };
 use serde_json::json;
 
@@ -42,11 +43,24 @@ struct Cli {
     verbose: u8,
 
     /// Use this installed Godot build for this command, whatever the project asks for
-    #[arg(long, global = true, value_name = "SPEC")]
+    #[arg(short, long, global = true, value_name = "SPEC")]
     godot: Option<String>,
+
+    /// When to use colors: auto, always or never
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    color: ColorArg,
 
     #[command(subcommand)]
     command: Option<Command>,
+}
+
+/// The values of `--color`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ColorArg {
+    /// Colors when writing to a terminal (and `NO_COLOR` is not set)
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Subcommand)]
@@ -71,7 +85,7 @@ enum Command {
     /// Show where gdt keeps its files, or open one of them
     Paths {
         /// Open this folder or file in the file manager
-        #[arg(long, value_enum, value_name = "WHAT")]
+        #[arg(short, long, value_enum, value_name = "WHAT")]
         open: Option<open::Place>,
     },
     /// There is no top-level `add`
@@ -89,7 +103,9 @@ enum EngineShortcut {
     Install(InstallArgs),
     /// List Godot builds: installed ones, or with --remote the ones you can install
     #[command(visible_alias = "ls")]
-    List(ListArgs),
+    List(list::ListArgs),
+    /// Show the Godot build in use here
+    Current(select::CurrentArgs),
     /// Remove an installed Godot build
     Uninstall(select::UninstallArgs),
     /// Choose the default Godot build, or show it
@@ -114,29 +130,13 @@ struct InstallArgs {
     /// Without it, installs what the current project asks for
     spec: Option<String>,
     /// Install the .NET build (same as the -mono suffix)
-    #[arg(long)]
+    #[arg(short, long)]
     mono: bool,
     /// Ignore the cached release list and ask GitHub again
     #[arg(long)]
     refresh: bool,
     /// Print machine-readable JSON
-    #[arg(long)]
-    json: bool,
-}
-
-#[derive(Args)]
-struct ListArgs {
-    /// List what is available on GitHub instead of what is installed
-    #[arg(long)]
-    remote: bool,
-    /// With --remote, include pre-releases (beta, rc, dev)
-    #[arg(long)]
-    all: bool,
-    /// Ignore the cached release list and ask GitHub again
-    #[arg(long)]
-    refresh: bool,
-    /// Print machine-readable JSON
-    #[arg(long)]
+    #[arg(short, long)]
     json: bool,
 }
 
@@ -237,6 +237,11 @@ fn exit_code(error: &anyhow::Error) -> u8 {
 
 fn run(cli: Cli) -> Result<()> {
     verbose::init(cli.verbose);
+    match cli.color {
+        ColorArg::Auto => {}
+        ColorArg::Always => console::set_colors_enabled(true),
+        ColorArg::Never => console::set_colors_enabled(false),
+    }
     // Redrawn bars would be torn apart by the log lines, so -v uses plain lines.
     let arg = if cli.verbose > 0 && cli.progress == ProgressArg::Auto {
         ProgressArg::Plain
@@ -275,7 +280,8 @@ fn run(cli: Cli) -> Result<()> {
 fn engine(command: EngineShortcut, ctx: &Ctx) -> Result<()> {
     match command {
         EngineShortcut::Install(args) => install(&args, ctx),
-        EngineShortcut::List(args) => list(&args, ctx),
+        EngineShortcut::List(args) => list::list(&args, ctx),
+        EngineShortcut::Current(args) => select::current(&args, ctx),
         EngineShortcut::Uninstall(args) => select::uninstall(&args, ctx),
         EngineShortcut::UseBuild(args) => select::use_build(&args, ctx),
         EngineShortcut::Pin(args) => select::pin_build(&args, ctx),
@@ -324,206 +330,6 @@ fn http_client() -> UreqClient {
 
 fn release_cache(dirs: &Dirs) -> ResponseCache {
     ResponseCache::new(dirs.api_cache_dir(), RELEASE_CACHE_TTL)
-}
-
-/// Which builds are the default and which one applies in the current folder.
-struct Marks {
-    default: Option<Build>,
-    in_use: Option<Resolved>,
-}
-
-impl Marks {
-    fn detect(ctx: &Ctx, dirs: &Dirs) -> Result<Self> {
-        let default = Config::load(&dirs.config_file())?.default_build();
-        let in_use = match select::resolve_for(ctx, dirs, Path::new(".")) {
-            Ok(resolved) => Some(resolved),
-            Err(error) => {
-                // A project that asks for a build that is not installed is worth saying.
-                if matches!(
-                    error.downcast_ref::<ResolveError>(),
-                    Some(ResolveError::NotInstalled { .. })
-                ) {
-                    ctx.info(format!("Note: {error}"));
-                }
-                None
-            }
-        };
-        Ok(Self { default, in_use })
-    }
-
-    fn is_default(&self, build: &Build) -> bool {
-        self.default == Some(*build)
-    }
-
-    fn is_in_use(&self, build: &Build) -> bool {
-        self.in_use.as_ref().is_some_and(|r| r.build == *build)
-    }
-
-    /// `in use here, default`, for the builds that are either.
-    fn labels(&self, build: &Build) -> Vec<&'static str> {
-        let mut labels = Vec::new();
-        if self.is_in_use(build) {
-            labels.push("in use here");
-        }
-        if self.is_default(build) {
-            labels.push("default");
-        }
-        labels
-    }
-
-    fn describe_in_use(&self, ctx: &Ctx) {
-        if let Some(resolved) = &self.in_use {
-            ctx.info(format!(
-                "In use here: Godot {} (from {})",
-                resolved.build, resolved.source
-            ));
-        }
-    }
-
-    fn json(&self) -> serde_json::Value {
-        json!({
-            "default": self.default.map(|b| b.to_string()),
-            "in_use": self.in_use.as_ref().map(|r| r.build.to_string()),
-            "in_use_from": self.in_use.as_ref().map(|r| r.source.to_string()),
-        })
-    }
-}
-
-fn list(args: &ListArgs, ctx: &Ctx) -> Result<()> {
-    let dirs = Dirs::detect()?;
-    let installed = dirs.installed_builds()?;
-    let marks = Marks::detect(ctx, &dirs)?;
-    if args.remote {
-        list_remote(args, ctx, &dirs, &installed, &marks)
-    } else {
-        list_installed(args, ctx, &installed, &marks)
-    }
-}
-
-fn list_installed(args: &ListArgs, ctx: &Ctx, installed: &[Build], marks: &Marks) -> Result<()> {
-    if args.json {
-        let versions: Vec<_> = installed
-            .iter()
-            .map(|b| {
-                json!({
-                    "id": b.to_string(),
-                    "version": b.version.to_string(),
-                    "mono": b.flavor == Flavor::Dotnet,
-                    "default": marks.is_default(b),
-                    "in_use": marks.is_in_use(b),
-                })
-            })
-            .collect();
-        let mut out = marks.json();
-        out["versions"] = versions.into();
-        println!("{out}");
-    } else if installed.is_empty() {
-        println!(
-            "No Godot builds are installed yet. See `gdt list --remote` for what is available."
-        );
-    } else {
-        for build in installed {
-            let labels = marks.labels(build);
-            if labels.is_empty() {
-                println!("{build}");
-            } else {
-                println!("{:<14}{}", build.to_string(), labels.join(", "));
-            }
-        }
-        marks.describe_in_use(ctx);
-    }
-    Ok(())
-}
-
-fn list_remote(
-    args: &ListArgs,
-    ctx: &Ctx,
-    dirs: &Dirs,
-    installed: &[Build],
-    marks: &Marks,
-) -> Result<()> {
-    let http = http_client();
-    let cache = release_cache(dirs);
-
-    let mut progress = CliProgress::new(ctx.style);
-    progress.begin("Fetching Godot releases", None);
-    let mut releases = fetch_releases(
-        &http,
-        Some(&cache),
-        Source::Stable,
-        args.refresh,
-        &mut progress,
-    )?;
-    if args.all {
-        releases.extend(fetch_releases(
-            &http,
-            Some(&cache),
-            Source::PreReleases,
-            args.refresh,
-            &mut progress,
-        )?);
-    }
-    progress.finish(&format!("Found {} Godot releases", releases.len()));
-
-    releases.sort_by_key(|r| std::cmp::Reverse(r.version));
-    releases.dedup_by_key(|r| r.version);
-
-    if args.json {
-        let versions: Vec<_> = releases.iter().map(|r| remote_json(r, installed)).collect();
-        let mut out = marks.json();
-        out["versions"] = versions.into();
-        println!("{out}");
-    } else {
-        for release in &releases {
-            let here: Vec<String> = installed
-                .iter()
-                .filter(|b| b.version == release.version)
-                .map(|b| {
-                    let name = flavor_name(b.flavor);
-                    match marks.labels(b).as_slice() {
-                        [] => name.to_string(),
-                        labels => format!("{name} ({})", labels.join(", ")),
-                    }
-                })
-                .collect();
-            if here.is_empty() {
-                println!("{}", release.version);
-            } else {
-                println!(
-                    "{:<12} installed: {}",
-                    release.version.to_string(),
-                    here.join(", ")
-                );
-            }
-        }
-        marks.describe_in_use(ctx);
-    }
-    Ok(())
-}
-
-fn flavor_name(flavor: Flavor) -> &'static str {
-    match flavor {
-        Flavor::Standard => "standard",
-        Flavor::Dotnet => "mono",
-    }
-}
-
-fn installed_flavors(version: &Version, installed: &[Build]) -> Vec<&'static str> {
-    installed
-        .iter()
-        .filter(|b| b.version == *version)
-        .map(|b| flavor_name(b.flavor))
-        .collect()
-}
-
-fn remote_json(release: &Release, installed: &[Build]) -> serde_json::Value {
-    json!({
-        "version": release.version.to_string(),
-        "tag": release.tag,
-        "channel": release.version.channel.to_string(),
-        "source": release.source.repo(),
-        "installed": installed_flavors(&release.version, installed),
-    })
 }
 
 /// The version a project asks for in its `project.godot`, as a spec.
