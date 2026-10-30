@@ -1,0 +1,19 @@
+[package]
+name = "godot-dev-tools"
+description = "Library behind gdt: Godot version management, addons and test running."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["godot", "gamedev", "version-manager"]
+categories = ["development-tools", "game-development"]
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true
