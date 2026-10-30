@@ -43,6 +43,21 @@ struct Raw {
     /// `[addons]`: the key `git` and one sub-table per addon.
     #[serde(default)]
     addons: BTreeMap<String, toml::Value>,
+    /// `[test]`.
+    #[serde(default)]
+    test: TestConfig,
+}
+
+/// The `[test]` table: how `gdt test` runs the project's tests.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct TestConfig {
+    /// `gut`, `gdunit4` or `script`; found from the installed addons when absent.
+    pub runner: Option<String>,
+    /// Folders or test files, relative to the project (default: `test`).
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// For `runner = "script"`: a GDScript run headless that exits non-zero on failure.
+    pub script: Option<String>,
 }
 
 /// What an `[addons.<name>]` table says: where the addon comes from.
@@ -86,6 +101,8 @@ pub struct Manifest {
     pub addons: BTreeMap<String, AddonEntry>,
     /// `[addons] git`.
     pub git_mode: GitMode,
+    /// `[test]`.
+    pub test: TestConfig,
 }
 
 impl Manifest {
@@ -132,6 +149,7 @@ impl Manifest {
             version: raw.godot.and_then(|g| g.version),
             addons,
             git_mode,
+            test: raw.test,
         })
     }
 }
@@ -338,6 +356,35 @@ git = \"sometimes\"
             Manifest::read(&path),
             Err(ManifestError::Invalid { .. })
         ));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_test_table_is_read() {
+        let dir = scratch("manifest-test");
+        let path = dir.join(MANIFEST_FILE);
+        fs::write(
+            &path,
+            "[test]
+runner = \"script\"
+paths = [\"test\", \"more/test_x.gd\"]
+script = \"tools/tests/run_suites.gd\"
+",
+        )
+        .unwrap();
+        let test = Manifest::read(&path).unwrap().test;
+        assert_eq!(test.runner.as_deref(), Some("script"));
+        assert_eq!(test.paths, ["test", "more/test_x.gd"]);
+        assert_eq!(test.script.as_deref(), Some("tools/tests/run_suites.gd"));
+
+        fs::write(
+            &path,
+            "[godot]
+version = \"4.7\"
+",
+        )
+        .unwrap();
+        assert_eq!(Manifest::read(&path).unwrap().test, TestConfig::default());
         let _ = fs::remove_dir_all(dir);
     }
 
