@@ -4,9 +4,11 @@
 //! This crate never prints and never exits the process. Diagnostics go through
 //! the `log` crate; the caller decides whether and how to show them.
 
+pub mod addons;
 pub mod config;
 pub mod engine;
 pub mod http;
+pub mod lock;
 pub mod manifest;
 pub mod progress;
 pub mod project;
@@ -15,13 +17,22 @@ pub mod resolve;
 pub mod storage;
 pub mod version;
 
+pub use addons::{
+    AddonError, AddonStatus, Fetched, GithubSource, InstallPlan, addon_status, install_github,
+    remove_addon_dir, resolve_commit,
+};
 pub use config::{Config, ConfigError};
 pub use engine::{
     Arch, EngineError, InstallRequest, Installed, find_console_executable, find_executable,
     install_build, uninstall_build,
 };
 pub use http::{HttpClient, HttpError, HttpResponse, UreqClient};
-pub use manifest::{MANIFEST_FILE, Manifest, ManifestError, pin};
+pub use lock::{
+    LOCK_FILE, LockError, LockFile, LockedAddon, hash_dir, ignore_lines, set_ignore_block,
+};
+pub use manifest::{
+    AddonEntry, GitMode, MANIFEST_FILE, Manifest, ManifestError, pin, remove_addon, set_addon,
+};
 pub use progress::{NoProgress, Progress};
 pub use project::{EngineFeatures, PROJECT_FILE, ProjectError, find_project_file};
 pub use releases::{Asset, Release, ReleaseError, ResponseCache, Source, fetch_releases};

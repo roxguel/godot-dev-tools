@@ -1,6 +1,6 @@
 # Addons
 
-Status: Draft. The Asset Store details come from its OpenAPI document (see [authentication.md](authentication.md)).
+Status: Draft. The GitHub source, the lockfile and the `.gitignore` block are implemented (`gdt addon add|install|remove|list|update`, `gdt sync`); the Asset Store, the Asset Library, URL and path sources are not yet. The Asset Store details come from its OpenAPI document (see [authentication.md](authentication.md)).
 
 ## Manifest and lockfile
 
@@ -16,7 +16,7 @@ version = "1.2.0"
 
 [addons.gut]
 github = "bitwes/Gut"
-tag = "v9.4.0"
+ref = "v9.4.0"      # a tag, a branch or a commit; the default branch if absent
 subdir = "addons/gut"           # folder inside the repo to copy into addons/<name>/
 
 [addons.some-lib]
@@ -40,7 +40,7 @@ dev = true                      # needed to work on the project, not shipped: se
 |---|---|---|
 | Godot Asset Store (default) | `gdt addon add publisher/asset`, `store:publisher/asset` | Public API. Assets are identified by `publisher/asset` slugs, not numbers. Each release has `min_godot_version` and `max_godot_version`, so `gdt` picks the release compatible with the project's engine |
 | Godot Asset Library (legacy) | `library:1234` | REST API; numeric ids |
-| GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `tag`, `branch` or `rev`. `subdir` selects the addon folder inside the repo. Private repositories need a token: see [authentication.md](authentication.md) |
+| GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `ref`: a tag, a branch or a commit. `subdir` selects the addon folder inside the repo. Private repositories need a token: see [authentication.md](authentication.md) |
 | URL | `https://example.com/x.zip` | Archive with a mandatory checksum |
 | Path | `path:../my-addon` | Local folder, copied or linked; for development |
 
@@ -69,7 +69,7 @@ Like Node's `devDependencies` or Cargo's `[dev-dependencies]`: an addon marked `
 ```toml
 [addons.gut]
 github = "bitwes/Gut"
-tag = "v9.4.0"
+ref = "v9.4.0"      # a tag, a branch or a commit; the default branch if absent
 dev = true
 ```
 

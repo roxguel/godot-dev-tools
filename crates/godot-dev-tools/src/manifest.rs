@@ -7,12 +7,13 @@
 //! version = "4.7.2"
 //! ```
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
 
 use serde::Deserialize;
-use toml_edit::{DocumentMut, value};
+use toml_edit::{DocumentMut, Item, Table, value};
 
 /// The name of the project file.
 pub const MANIFEST_FILE: &str = "gdt.toml";
@@ -39,6 +40,36 @@ pub enum ManifestError {
 #[derive(Deserialize, Default)]
 struct Raw {
     godot: Option<RawGodot>,
+    /// `[addons]`: the key `git` and one sub-table per addon.
+    #[serde(default)]
+    addons: BTreeMap<String, toml::Value>,
+}
+
+/// What an `[addons.<name>]` table says: where the addon comes from.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct AddonEntry {
+    /// `owner/repo` on GitHub.
+    pub github: Option<String>,
+    /// A tag, branch or commit; the default branch when none is given.
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    /// The folder inside the repository that holds the addon.
+    pub subdir: Option<String>,
+    /// Needed to work on the project but not shipped with the game.
+    #[serde(default)]
+    pub dev: bool,
+}
+
+/// How `addons/` relates to Git (`[addons] git`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GitMode {
+    /// Only the folders gdt installed are ignored.
+    #[default]
+    Managed,
+    /// Nothing is ignored.
+    Track,
+    /// The whole `addons/` folder is ignored.
+    Ignore,
 }
 
 #[derive(Deserialize, Default)]
@@ -51,6 +82,10 @@ struct RawGodot {
 pub struct Manifest {
     /// `[godot] version`, as written (a version spec such as `4.7.2` or `4.7.2-mono`).
     pub version: Option<String>,
+    /// The addons declared in `[addons.<name>]`.
+    pub addons: BTreeMap<String, AddonEntry>,
+    /// `[addons] git`.
+    pub git_mode: GitMode,
 }
 
 impl Manifest {
@@ -68,10 +103,101 @@ impl Manifest {
             path: path.display().to_string(),
             message: e.to_string(),
         })?;
+        let invalid = |message: String| ManifestError::Invalid {
+            path: path.display().to_string(),
+            message,
+        };
+        let mut addons = BTreeMap::new();
+        let mut git_mode = GitMode::default();
+        for (key, item) in raw.addons {
+            if key == "git" {
+                git_mode = match item.as_str() {
+                    Some("managed") => GitMode::Managed,
+                    Some("track") => GitMode::Track,
+                    Some("ignore") => GitMode::Ignore,
+                    _ => {
+                        return Err(invalid(
+                            "[addons] git must be \"managed\", \"track\" or \"ignore\"".into(),
+                        ));
+                    }
+                };
+            } else {
+                let entry: AddonEntry = item
+                    .try_into()
+                    .map_err(|e: toml::de::Error| invalid(format!("[addons.{key}]: {e}")))?;
+                addons.insert(key, entry);
+            }
+        }
         Ok(Self {
             version: raw.godot.and_then(|g| g.version),
+            addons,
+            git_mode,
         })
     }
+}
+
+fn load_document(path: &Path) -> Result<DocumentMut, ManifestError> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(ManifestError::Read {
+                path: path.display().to_string(),
+                source,
+            });
+        }
+    };
+    text.parse()
+        .map_err(|e: toml_edit::TomlError| ManifestError::Invalid {
+            path: path.display().to_string(),
+            message: e.to_string(),
+        })
+}
+
+fn save_document(path: &Path, doc: &DocumentMut) -> Result<(), ManifestError> {
+    fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+/// Adds or replaces `[addons.<name>]` in the file at `path` (created if needed),
+/// leaving everything else, comments included, as it was.
+pub fn set_addon(path: &Path, name: &str, entry: &AddonEntry) -> Result<(), ManifestError> {
+    let mut doc = load_document(path)?;
+    if !doc.contains_table("addons") {
+        let mut table = Table::new();
+        table.set_implicit(true);
+        doc["addons"] = Item::Table(table);
+    }
+    let mut table = Table::new();
+    if let Some(github) = &entry.github {
+        table["github"] = value(github.as_str());
+    }
+    if let Some(git_ref) = &entry.git_ref {
+        table["ref"] = value(git_ref.as_str());
+    }
+    if let Some(subdir) = &entry.subdir {
+        table["subdir"] = value(subdir.as_str());
+    }
+    if entry.dev {
+        table["dev"] = value(true);
+    }
+    doc["addons"][name] = Item::Table(table);
+    save_document(path, &doc)
+}
+
+/// Removes `[addons.<name>]`; `false` if there was none.
+pub fn remove_addon(path: &Path, name: &str) -> Result<bool, ManifestError> {
+    let mut doc = load_document(path)?;
+    let Some(addons) = doc.get_mut("addons").and_then(Item::as_table_mut) else {
+        return Ok(false);
+    };
+    let removed = addons.remove(name).is_some();
+    if removed {
+        save_document(path, &doc)?;
+    }
+    Ok(removed)
 }
 
 /// Sets `[godot] version` in the file at `path`, creating the file if needed.
@@ -154,6 +280,141 @@ mod tests {
         let err = Manifest::read(&path).unwrap_err();
         assert!(matches!(err, ManifestError::Invalid { .. }));
         assert!(err.to_string().contains(MANIFEST_FILE));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn addons_and_the_git_mode_are_read() {
+        let dir = scratch("manifest-addons");
+        let path = dir.join(MANIFEST_FILE);
+        fs::write(
+            &path,
+            "[godot]
+version = \"4.7\"
+
+[addons]
+git = \"track\"
+
+[addons.gut]
+github = \"bitwes/Gut\"
+ref = \"v9.4.0\"
+subdir = \"addons/gut\"
+dev = true
+
+[addons.other]
+github = \"o/r\"
+",
+        )
+        .unwrap();
+        let manifest = Manifest::read(&path).unwrap();
+        assert_eq!(manifest.git_mode, GitMode::Track);
+        assert_eq!(manifest.addons.len(), 2);
+        let gut = &manifest.addons["gut"];
+        assert_eq!(gut.github.as_deref(), Some("bitwes/Gut"));
+        assert_eq!(gut.git_ref.as_deref(), Some("v9.4.0"));
+        assert_eq!(gut.subdir.as_deref(), Some("addons/gut"));
+        assert!(gut.dev);
+        assert!(!manifest.addons["other"].dev);
+
+        fs::write(
+            &path,
+            "[godot]
+version = \"4.7\"
+",
+        )
+        .unwrap();
+        let bare = Manifest::read(&path).unwrap();
+        assert!(bare.addons.is_empty());
+        assert_eq!(bare.git_mode, GitMode::Managed);
+
+        fs::write(
+            &path,
+            "[addons]
+git = \"sometimes\"
+",
+        )
+        .unwrap();
+        assert!(matches!(
+            Manifest::read(&path),
+            Err(ManifestError::Invalid { .. })
+        ));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn set_and_remove_an_addon_keep_everything_else() {
+        let dir = scratch("manifest-set-addon");
+        let path = dir.join(MANIFEST_FILE);
+        fs::write(
+            &path,
+            "# my project
+[godot]
+version = \"4.7.2\"  # pinned
+",
+        )
+        .unwrap();
+
+        let entry = AddonEntry {
+            github: Some("bitwes/Gut".into()),
+            git_ref: Some("v9.4.0".into()),
+            subdir: Some("addons/gut".into()),
+            dev: true,
+        };
+        set_addon(&path, "gut", &entry).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# my project") && text.contains("# pinned"),
+            "{text}"
+        );
+        assert!(text.contains("[addons.gut]"), "{text}");
+        assert!(
+            !text.contains(
+                "[addons]
+"
+            ),
+            "no empty parent header: {text}"
+        );
+        assert_eq!(Manifest::read(&path).unwrap().addons["gut"], entry);
+
+        // Replacing keeps one table; a second addon is added next to it.
+        set_addon(
+            &path,
+            "gut",
+            &AddonEntry {
+                dev: false,
+                ..entry.clone()
+            },
+        )
+        .unwrap();
+        set_addon(
+            &path,
+            "zed",
+            &AddonEntry {
+                github: Some("o/zed".into()),
+                ..AddonEntry::default()
+            },
+        )
+        .unwrap();
+        let manifest = Manifest::read(&path).unwrap();
+        assert_eq!(manifest.addons.len(), 2);
+        assert!(!manifest.addons["gut"].dev);
+
+        assert!(remove_addon(&path, "gut").unwrap());
+        assert!(!remove_addon(&path, "gut").unwrap());
+        assert!(remove_addon(&path, "zed").unwrap());
+        let after = fs::read_to_string(&path).unwrap();
+        assert!(
+            after.contains("# my project") && after.contains("version = \"4.7.2\""),
+            "{after}"
+        );
+        assert!(Manifest::read(&path).unwrap().addons.is_empty());
+
+        // A file that never existed is created, and removing from it is a no-op.
+        let fresh = dir.join("fresh.toml");
+        assert!(!remove_addon(&fresh, "x").unwrap());
+        assert!(!fresh.exists());
+        set_addon(&fresh, "x", &AddonEntry::default()).unwrap();
+        assert!(Manifest::read(&fresh).unwrap().addons.contains_key("x"));
         let _ = fs::remove_dir_all(dir);
     }
 
