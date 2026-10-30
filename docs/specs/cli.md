@@ -4,6 +4,27 @@ Status: Draft
 
 One binary, `gdt`, with subcommands (ADR 0003). Global flags: `--json` (machine-readable output where the command prints data), `--quiet`, `--verbose`, `--color <auto|always|never>`, `--godot <version>` (override the resolved version for this command).
 
+## Output and progress
+
+Data goes to **stdout**; progress and status messages go to **stderr**, so pipes and scripts see clean data. `--json` output never contains progress.
+
+Progress comes in three styles, chosen with `--progress <auto|rich|plain|none>` (default `auto`):
+
+| Style | What it looks like | Chosen by `auto` when |
+|---|---|---|
+| `rich` | Spinners and progress bars with speed and ETA, redrawn in place | stderr is a terminal, `CI` is not set and `TERM` is not `dumb` |
+| `plain` | One line per step (`Fetching Godot releases...`, `done`), no redrawing | anything else (pipes, logs, CI) |
+| `none` | Nothing | never; used by `--quiet` |
+
+`--quiet` is the same as `--progress none` and also hides informational messages (errors are always shown). `NO_COLOR` and `--color` are honored. The library only reports progress through a small trait; drawing it is the CLI's job, so the library and the shim never print (ADR 0001, ADR 0006).
+
+## Network
+
+- GitHub API requests send `User-Agent: gdt/<version>`.
+- An optional `GITHUB_TOKEN` (or `GH_TOKEN`) raises the API rate limit. It is only ever sent to `api.github.com`, never to other hosts, and never printed.
+- Release lists are cached under the cache directory for 10 minutes; `--refresh` skips the cache.
+- When the rate limit is hit, `gdt` says so, when it resets, and suggests setting a token; exit code 3.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -25,7 +46,7 @@ See [version-management.md](version-management.md).
 |---|---|
 | `gdt install [<version>] [--mono]` | Download and install a build. With no version, installs what the project resolves to |
 | `gdt uninstall <version>` | Remove an installed build |
-| `gdt list [--remote] [--all]` | Installed builds; `--remote` queries GitHub; `--all` includes pre-releases |
+| `gdt list [--remote] [--all] [--refresh] [--json]` | Installed builds; `--remote` queries GitHub for what can be installed; `--all` adds pre-releases (beta, rc, dev) |
 | `gdt use <version>` | Set the global default |
 | `gdt pin <version>` | Write the version into the project's `gdt.toml` |
 | `gdt which [<project>]` | Print the path of the executable that would run |

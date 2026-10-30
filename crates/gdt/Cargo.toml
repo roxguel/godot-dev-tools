@@ -14,6 +14,8 @@ readme = "../../README.md"
 godot-dev-tools.workspace = true
 clap.workspace = true
 anyhow.workspace = true
+indicatif.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

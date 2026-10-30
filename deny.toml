@@ -18,6 +18,13 @@ allow = [
     "CC0-1.0",
 ]
 
+# The Mozilla root certificate bundle used for HTTPS is licensed under the
+# Community Data License Agreement Permissive 2.0 (a permissive data license).
+# Allowed for that one crate only.
+[[licenses.exceptions]]
+crate = "webpki-roots"
+allow = ["CDLA-Permissive-2.0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

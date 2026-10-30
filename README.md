@@ -25,6 +25,10 @@ gdt test                           # run the project's test suites headless
 
 `gdt` can also install a `godot` shim on your `PATH`, so a plain `godot --path <project> ...` picks the right version by itself.
 
+## AI-assisted development
+
+This project is developed with the help of AI coding assistants (Claude Code). Every change goes through a pull request that the maintainer reviews and merges, and the design decisions are recorded in [`docs/`](docs/README.md).
+
 ## Names
 
 | What | Name |
