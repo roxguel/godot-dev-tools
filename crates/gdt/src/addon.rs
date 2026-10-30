@@ -1,4 +1,9 @@
 //! `gdt addon ...` and `gdt sync`: the addons of a project.
+//!
+//! An addon comes from the Godot Asset Store (the default: `publisher/asset`),
+//! the legacy Asset Library (`library:123`) or GitHub (`github:owner/repo`).
+//! Whatever the source, `add` resolves it to something exact (a commit, a
+//! release), installs it, records it in `gdt.toml` and pins it in `gdt.lock`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,9 +11,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use godot_dev_tools::{
-    AddonEntry, AddonError, AddonStatus, GitMode, GithubSource, InstallPlan, LOCK_FILE, LockFile,
-    LockedAddon, MANIFEST_FILE, Manifest, Progress, addon_status, find_project_root, ignore_lines,
-    install_github, remove_addon, remove_addon_dir, resolve_commit, set_addon, set_ignore_block,
+    AddonEntry, AddonError, AddonStatus, ArchiveJob, EngineFeatures, Fetched, GitMode,
+    GithubSource, InstallPlan, LOCK_FILE, LibraryAsset, LockFile, LockedAddon, MANIFEST_FILE,
+    Manifest, Progress, SearchHit, StoreAsset, StoreRelease, addon_status, find_project_root,
+    ignore_lines, install_archive, install_github, library_asset, library_search, parse_library_id,
+    pick_release, remove_addon, remove_addon_dir, resolve_commit, set_addon, set_ignore_block,
+    store_info, store_releases, store_search,
 };
 use serde_json::json;
 
@@ -27,18 +35,21 @@ pub enum AddonCommand {
     /// List the addons of the project and whether they are installed
     #[command(visible_alias = "ls")]
     List(ListArgs),
-    /// Look for newer commits of the addons and install them
+    /// Look for newer versions of the addons and install them
     Update(UpdateArgs),
+    /// Search the Asset Store (or, with --library, the legacy Asset Library)
+    Search(SearchArgs),
 }
 
 #[derive(Args)]
 pub struct AddArgs {
-    /// Where it comes from: github:owner/repo or github:owner/repo@ref (a tag, branch or commit)
+    /// Where it comes from: publisher/asset (Asset Store), store:publisher/asset@version,
+    /// library:123 (Asset Library) or github:owner/repo@ref
     source: String,
-    /// The folder name under addons/ (default: the addon's folder in the repository)
+    /// The folder name under addons/ (default: the addon's folder in the archive)
     #[arg(long)]
     name: Option<String>,
-    /// The folder of the repository that holds the addon (default: the only one in addons/)
+    /// The folder of the archive that holds the addon (default: the only one in addons/)
     #[arg(long)]
     subdir: Option<String>,
     /// Needed to work on the project but not shipped with the game
@@ -87,6 +98,18 @@ pub struct UpdateArgs {
     /// Replace an addon whose files differ from the lockfile
     #[arg(short, long)]
     force: bool,
+}
+
+#[derive(Args)]
+pub struct SearchArgs {
+    /// What to look for
+    text: String,
+    /// Search the legacy Asset Library instead of the Asset Store
+    #[arg(long)]
+    library: bool,
+    /// Print machine-readable JSON
+    #[arg(short, long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -141,30 +164,299 @@ impl Project {
         }
         Ok(())
     }
+
+    /// `MAJOR.MINOR` of the engine the project asks for, to pick compatible releases.
+    fn engine_version(&self) -> Option<String> {
+        let features = EngineFeatures::from_file(&self.dir.join("project.godot")).ok()?;
+        features
+            .engine
+            .map(|(major, minor)| format!("{major}.{minor}"))
+    }
 }
 
-/// `github:owner/repo` or a GitHub URL; a bare `publisher/asset` is the Asset Store.
-fn github_source(text: &str) -> Result<GithubSource> {
-    let text = text.trim();
-    let is_github = text.starts_with("github:")
-        || text.starts_with("https://github.com/")
-        || text.starts_with("http://github.com/");
-    if !is_github {
-        return Err(UsageError(format!(
-            "`{text}` is not a GitHub source. For now addons come from GitHub: write \
-             `github:owner/repo` or `github:owner/repo@ref` (the Asset Store and the Asset \
-             Library are not supported yet)"
-        ))
-        .into());
+/// Where an addon comes from.
+#[derive(Debug, Clone)]
+enum Kind {
+    Github(GithubSource),
+    Store(StoreAsset),
+    Library(String),
+}
+
+impl Kind {
+    /// How the lockfile names the source.
+    fn lock_name(&self) -> String {
+        match self {
+            Self::Github(source) => source.lock_name(),
+            Self::Store(asset) => asset.lock_name(),
+            Self::Library(id) => format!("library:{id}"),
+        }
     }
-    Ok(GithubSource::parse(text)?)
+
+    fn label(&self) -> String {
+        match self {
+            Self::Github(source) => source.slug(),
+            Self::Store(asset) => asset.slug(),
+            Self::Library(id) => format!("library:{id}"),
+        }
+    }
+}
+
+/// Reads what the user typed after `gdt addon add`; the second value is a
+/// version asked for with `@version` on a Store asset.
+fn parse_source(text: &str) -> Result<(Kind, Option<String>)> {
+    let text = text.trim();
+    if text.starts_with("github:")
+        || text.starts_with("https://github.com/")
+        || text.starts_with("http://github.com/")
+    {
+        return Ok((Kind::Github(GithubSource::parse(text)?), None));
+    }
+    if text.starts_with("library:") {
+        return Ok((Kind::Library(parse_library_id(text)?), None));
+    }
+    // `store:publisher/asset`, or a bare `publisher/asset`: the Asset Store is the default.
+    let (asset, version) = StoreAsset::parse(text).map_err(|_| {
+        UsageError(format!(
+            "`{text}` is not an addon source. Write publisher/asset (Asset Store), \
+             library:123 (Asset Library) or github:owner/repo"
+        ))
+    })?;
+    Ok((Kind::Store(asset), version))
+}
+
+/// The source an `[addons.<name>]` entry stands for.
+fn entry_kind(name: &str, entry: &AddonEntry) -> Result<Kind> {
+    if let Some(github) = &entry.github {
+        let mut source = GithubSource::parse(&format!("github:{github}"))?;
+        source.git_ref = entry.git_ref.clone();
+        return Ok(Kind::Github(source));
+    }
+    if let Some(store) = &entry.store {
+        return Ok(Kind::Store(StoreAsset::parse(store)?.0));
+    }
+    if let Some(library) = &entry.library {
+        return Ok(Kind::Library(parse_library_id(library)?));
+    }
+    Err(UsageError(format!(
+        "[addons.{name}] needs a `github`, `store` or `library` key"
+    ))
+    .into())
+}
+
+/// Something exact to install: a commit, a Store release or a Library version.
+enum Pinned {
+    Github {
+        source: GithubSource,
+        sha: String,
+    },
+    Store {
+        asset: StoreAsset,
+        release: StoreRelease,
+    },
+    Library {
+        asset: LibraryAsset,
+    },
+}
+
+impl Pinned {
+    fn lock_name(&self) -> String {
+        match self {
+            Self::Github { source, .. } => source.lock_name(),
+            Self::Store { asset, .. } => asset.lock_name(),
+            Self::Library { asset } => asset.lock_name(),
+        }
+    }
+
+    /// What the lockfile records as the revision.
+    fn rev(&self) -> String {
+        match self {
+            Self::Github { sha, .. } => sha.clone(),
+            Self::Store { release, .. } => release.version.clone(),
+            Self::Library { asset } => asset.version.clone(),
+        }
+    }
 }
 
 fn short(rev: &str) -> &str {
-    rev.get(..7).unwrap_or(rev)
+    if rev.len() == 40 && rev.bytes().all(|b| b.is_ascii_hexdigit()) {
+        &rev[..7]
+    } else {
+        rev
+    }
+}
+
+/// A name safe to use in a cache file.
+fn file_safe(text: &str) -> String {
+    text.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Resolves a source to something exact: the newest compatible Store release (or
+/// `version`), the Library's current version, or the commit a GitHub ref points to.
+fn resolve_new(
+    kind: &Kind,
+    version: Option<&str>,
+    engine: Option<&str>,
+    progress: &mut CliProgress,
+) -> Result<Pinned> {
+    let http = http_client();
+    progress.begin(&format!("Resolving {}", kind.label()), None);
+    let pinned = match kind {
+        Kind::Github(source) => Pinned::Github {
+            sha: resolve_commit(&http, source, source.git_ref.as_deref())?,
+            source: source.clone(),
+        },
+        Kind::Store(asset) => {
+            let info = store_info(&http, asset)?;
+            if info.price_cent > 0 {
+                return Err(AddonError::Paid {
+                    name: asset.slug(),
+                    price: format!("{}.{:02}", info.price_cent / 100, info.price_cent % 100),
+                    url: info.store_url,
+                }
+                .into());
+            }
+            // A version named by the user is looked up in the whole list; otherwise
+            // only the releases that work with the project's Godot.
+            let compat = if version.is_some() { None } else { engine };
+            let releases = store_releases(&http, asset, compat)?;
+            let release = pick_release(&releases, version).ok_or_else(|| {
+                AddonError::NotFound(match (version, compat) {
+                    (Some(v), _) => format!("{} version {v}", asset.slug()),
+                    (None, Some(g)) => {
+                        format!("a release of {} that works with Godot {g}", asset.slug())
+                    }
+                    (None, None) => format!("a release of {}", asset.slug()),
+                })
+            })?;
+            Pinned::Store {
+                asset: asset.clone(),
+                release: release.clone(),
+            }
+        }
+        Kind::Library(id) => Pinned::Library {
+            asset: library_asset(&http, id)?,
+        },
+    };
+    progress.finish(&format!("{} is at {}", kind.label(), short(&pinned.rev())));
+    Ok(pinned)
+}
+
+/// Finds again what the lockfile recorded, so it can be downloaded again.
+fn pinned_from_lock(kind: &Kind, locked: &LockedAddon) -> Result<Pinned> {
+    let http = http_client();
+    Ok(match kind {
+        Kind::Github(source) => Pinned::Github {
+            source: source.clone(),
+            sha: locked.rev.clone(),
+        },
+        Kind::Store(asset) => {
+            let releases = store_releases(&http, asset, None)?;
+            let release = pick_release(&releases, Some(&locked.rev)).ok_or_else(|| {
+                AddonError::NotFound(format!(
+                    "release {} of {} (it is no longer listed)",
+                    locked.rev,
+                    asset.slug()
+                ))
+            })?;
+            Pinned::Store {
+                asset: asset.clone(),
+                release: release.clone(),
+            }
+        }
+        Kind::Library(id) => {
+            let asset = library_asset(&http, id)?;
+            if asset.version != locked.rev {
+                return Err(UsageError(format!(
+                    "the Asset Library now has version {} of library:{id}, but {LOCK_FILE} has {}; \
+                     run `gdt addon update {}`",
+                    asset.version, locked.rev, locked.name
+                ))
+                .into());
+            }
+            Pinned::Library { asset }
+        }
+    })
+}
+
+/// Downloads and installs a pinned addon.
+fn fetch(
+    project: &Project,
+    pinned: &Pinned,
+    subdir: Option<&str>,
+    name: Option<&str>,
+    replace: bool,
+    progress: &mut CliProgress,
+) -> Result<Fetched> {
+    let dirs = godot_dev_tools::Dirs::detect()?;
+    let http = http_client();
+    let fetched = match pinned {
+        Pinned::Github { source, sha } => install_github(
+            &http,
+            &dirs,
+            &project.dir,
+            &InstallPlan {
+                source,
+                sha,
+                subdir,
+                name,
+                replace,
+            },
+            progress,
+        )?,
+        Pinned::Store { asset, release } => install_archive(
+            &http,
+            &dirs,
+            &project.dir,
+            &ArchiveJob {
+                file_name: file_safe(&format!(
+                    "store-{}-{}-{}.zip",
+                    asset.publisher, asset.asset, release.version
+                )),
+                url: release.download_url.clone(),
+                label: asset.slug(),
+                default_name: &asset.asset,
+                subdir,
+                name,
+                replace,
+                sha256: None,
+            },
+            progress,
+        )?,
+        Pinned::Library { asset } => {
+            let default_name = file_safe(&asset.title.to_ascii_lowercase());
+            install_archive(
+                &http,
+                &dirs,
+                &project.dir,
+                &ArchiveJob {
+                    file_name: file_safe(&format!("library-{}-{}.zip", asset.id, asset.version)),
+                    url: asset.download_url.clone(),
+                    label: asset.title.clone(),
+                    default_name: &default_name,
+                    subdir,
+                    name,
+                    replace,
+                    sha256: asset.download_hash.as_deref(),
+                },
+                progress,
+            )?
+        }
+    };
+    Ok(fetched)
 }
 
 pub fn run(command: &AddonCommand, ctx: &Ctx) -> Result<()> {
+    if let AddonCommand::Search(args) = command {
+        return search(args);
+    }
     let project = Project::find()?;
     match command {
         AddonCommand::Add(args) => add(&project, ctx, args),
@@ -185,48 +477,53 @@ pub fn run(command: &AddonCommand, ctx: &Ctx) -> Result<()> {
         AddonCommand::Remove(args) => remove(&project, ctx, args),
         AddonCommand::List(args) => list(&project, args),
         AddonCommand::Update(args) => update(&project, ctx, args),
+        AddonCommand::Search(_) => unreachable!("handled above"),
     }
 }
 
 fn add(project: &Project, ctx: &Ctx, args: &AddArgs) -> Result<()> {
-    let dirs = godot_dev_tools::Dirs::detect()?;
-    let source = github_source(&args.source)?;
-    let http = http_client();
+    let (kind, version) = parse_source(&args.source)?;
     let mut progress = CliProgress::new(ctx.style);
-
-    progress.begin(&format!("Resolving {}", source.slug()), None);
-    let sha = resolve_commit(&http, &source, source.git_ref.as_deref())?;
-    progress.finish(&format!("{} is at {}", source.slug(), short(&sha)));
-
-    let fetched = install_github(
-        &http,
-        &dirs,
-        &project.dir,
-        &InstallPlan {
-            source: &source,
-            sha: &sha,
-            subdir: args.subdir.as_deref(),
-            name: args.name.as_deref(),
-            replace: args.force,
-        },
+    let engine = project.engine_version();
+    let pinned = resolve_new(&kind, version.as_deref(), engine.as_deref(), &mut progress)?;
+    let fetched = fetch(
+        project,
+        &pinned,
+        args.subdir.as_deref(),
+        args.name.as_deref(),
+        args.force,
         &mut progress,
     )?;
 
-    set_addon(
-        &project.manifest,
-        &fetched.name,
-        &AddonEntry {
-            github: Some(source.slug()),
-            git_ref: source.git_ref.clone(),
-            subdir: Some(fetched.subdir.clone()),
-            dev: args.dev,
+    let entry = AddonEntry {
+        github: match &kind {
+            Kind::Github(source) => Some(source.slug()),
+            _ => None,
         },
-    )?;
+        git_ref: match &kind {
+            Kind::Github(source) => source.git_ref.clone(),
+            _ => None,
+        },
+        store: match &kind {
+            Kind::Store(asset) => Some(asset.slug()),
+            _ => None,
+        },
+        library: match &kind {
+            Kind::Library(id) => Some(id.clone()),
+            _ => None,
+        },
+        // Only a version the user asked for is recorded; otherwise `update` may move on.
+        version,
+        subdir: Some(fetched.subdir.clone()),
+        dev: args.dev,
+    };
+    set_addon(&project.manifest, &fetched.name, &entry)?;
+
     let mut lock = LockFile::load(&project.lock)?;
     lock.upsert(LockedAddon {
         name: fetched.name.clone(),
-        source: source.lock_name(),
-        rev: sha.clone(),
+        source: pinned.lock_name(),
+        rev: pinned.rev(),
         subdir: fetched.subdir.clone(),
         hash: fetched.hash.clone(),
     });
@@ -236,8 +533,8 @@ fn add(project: &Project, ctx: &Ctx, args: &AddArgs) -> Result<()> {
     ctx.info(format!(
         "Added {} ({} at {}) to addons/{}",
         fetched.name,
-        source.slug(),
-        short(&sha),
+        kind.label(),
+        short(&pinned.rev()),
         fetched.name
     ));
     if project
@@ -255,18 +552,6 @@ fn add(project: &Project, ctx: &Ctx, args: &AddArgs) -> Result<()> {
     Ok(())
 }
 
-/// The source and reference an `[addons.<name>]` entry stands for.
-fn entry_source(name: &str, entry: &AddonEntry) -> Result<GithubSource> {
-    let github = entry.github.as_deref().ok_or_else(|| {
-        UsageError(format!(
-            "[addons.{name}] has no `github` key; only GitHub sources are supported so far"
-        ))
-    })?;
-    let mut source = GithubSource::parse(&format!("github:{github}"))?;
-    source.git_ref = entry.git_ref.clone();
-    Ok(source)
-}
-
 fn install_all(
     project: &Project,
     ctx: &Ctx,
@@ -279,10 +564,9 @@ fn install_all(
         ctx.info("This project declares no addons");
         return Ok(());
     }
-    let dirs = godot_dev_tools::Dirs::detect()?;
-    let http = http_client();
     let mut lock = LockFile::load(&project.lock)?;
     let mut progress = CliProgress::new(ctx.style);
+    let engine = project.engine_version();
     let mut changed = false;
 
     for (name, entry) in &manifest.addons {
@@ -290,10 +574,10 @@ fn install_all(
             ctx.info(format!("Skipping {name} (development addon)"));
             continue;
         }
-        let source = entry_source(name, entry)?;
+        let kind = entry_kind(name, entry)?;
         let existing = lock
             .get(name)
-            .filter(|l| l.source == source.lock_name())
+            .filter(|l| l.source == kind.lock_name())
             .cloned();
 
         match existing {
@@ -304,17 +588,13 @@ fn install_all(
                         if status == AddonStatus::Modified && !force {
                             return Err(AddonError::Modified { name: name.clone() }.into());
                         }
-                        let fetched = install_github(
-                            &http,
-                            &dirs,
-                            &project.dir,
-                            &InstallPlan {
-                                source: &source,
-                                sha: &locked.rev,
-                                subdir: Some(&locked.subdir),
-                                name: Some(name),
-                                replace: true,
-                            },
+                        let pinned = pinned_from_lock(&kind, &locked)?;
+                        let fetched = fetch(
+                            project,
+                            &pinned,
+                            Some(&locked.subdir),
+                            Some(name),
+                            true,
                             &mut progress,
                         )?;
                         if fetched.hash != locked.hash {
@@ -337,31 +617,29 @@ fn install_all(
                     ))
                     .into());
                 }
-                progress.begin(&format!("Resolving {}", source.slug()), None);
-                let sha = resolve_commit(&http, &source, source.git_ref.as_deref())?;
-                progress.finish(&format!("{} is at {}", source.slug(), short(&sha)));
-                let fetched = install_github(
-                    &http,
-                    &dirs,
-                    &project.dir,
-                    &InstallPlan {
-                        source: &source,
-                        sha: &sha,
-                        subdir: entry.subdir.as_deref(),
-                        name: Some(name),
-                        replace: force,
-                    },
+                let pinned = resolve_new(
+                    &kind,
+                    entry.version.as_deref(),
+                    engine.as_deref(),
+                    &mut progress,
+                )?;
+                let fetched = fetch(
+                    project,
+                    &pinned,
+                    entry.subdir.as_deref(),
+                    Some(name),
+                    force,
                     &mut progress,
                 )?;
                 lock.upsert(LockedAddon {
                     name: name.clone(),
-                    source: source.lock_name(),
-                    rev: sha.clone(),
+                    source: pinned.lock_name(),
+                    rev: pinned.rev(),
                     subdir: fetched.subdir,
                     hash: fetched.hash,
                 });
                 changed = true;
-                ctx.info(format!("Installed {name} ({})", short(&sha)));
+                ctx.info(format!("Installed {name} ({})", short(&pinned.rev())));
             }
         }
     }
@@ -423,19 +701,32 @@ fn remove(project: &Project, ctx: &Ctx, args: &RemoveArgs) -> Result<()> {
     Ok(())
 }
 
+/// The source of an entry as the user would write it.
+fn describe_source(entry: &AddonEntry) -> String {
+    if let Some(github) = &entry.github {
+        return match &entry.git_ref {
+            Some(r) => format!("github:{github}@{r}"),
+            None => format!("github:{github}"),
+        };
+    }
+    if let Some(store) = &entry.store {
+        return match &entry.version {
+            Some(v) => format!("store:{store}@{v}"),
+            None => format!("store:{store}"),
+        };
+    }
+    if let Some(library) = &entry.library {
+        return format!("library:{library}");
+    }
+    "(no source)".to_string()
+}
+
 fn list(project: &Project, args: &ListArgs) -> Result<()> {
     let manifest = project.manifest()?;
     let lock = LockFile::load(&project.lock)?;
     let mut rows = Vec::new();
     for (name, entry) in &manifest.addons {
-        let source = entry
-            .github
-            .as_ref()
-            .map(|g| match &entry.git_ref {
-                Some(r) => format!("github:{g}@{r}"),
-                None => format!("github:{g}"),
-            })
-            .unwrap_or_else(|| "(no source)".to_string());
+        let source = describe_source(entry);
         let (rev, status) = match lock.get(name) {
             Some(locked) => (
                 short(&locked.rev).to_string(),
@@ -459,13 +750,11 @@ fn list(project: &Project, args: &ListArgs) -> Result<()> {
             .collect();
         println!("{}", json!({ "addons": items }));
     } else if rows.is_empty() {
-        println!(
-            "This project declares no addons. Add one with `gdt addon add github:owner/repo`."
-        );
+        println!("This project declares no addons. Add one with `gdt addon add publisher/asset`.");
     } else {
         for (name, source, rev, status, dev) in &rows {
             let dev = if *dev { "  dev" } else { "" };
-            println!("{name:<20} {source:<36} {rev:<8} {status}{dev}");
+            println!("{name:<20} {source:<40} {rev:<10} {status}{dev}");
         }
     }
     Ok(())
@@ -482,40 +771,38 @@ fn update(project: &Project, ctx: &Ctx, args: &UpdateArgs) -> Result<()> {
         }
         None => manifest.addons.keys().cloned().collect(),
     };
-    let dirs = godot_dev_tools::Dirs::detect()?;
-    let http = http_client();
     let mut lock = LockFile::load(&project.lock)?;
     let mut progress = CliProgress::new(ctx.style);
+    let engine = project.engine_version();
 
     for name in names {
         let entry = &manifest.addons[&name];
-        let source = entry_source(&name, entry)?;
-        progress.begin(&format!("Resolving {}", source.slug()), None);
-        let sha = resolve_commit(&http, &source, source.git_ref.as_deref())?;
-        progress.finish(&format!("{} is at {}", source.slug(), short(&sha)));
+        let kind = entry_kind(&name, entry)?;
+        let pinned = resolve_new(
+            &kind,
+            entry.version.as_deref(),
+            engine.as_deref(),
+            &mut progress,
+        )?;
+        let rev = pinned.rev();
 
         let current = lock.get(&name).cloned();
         if let Some(locked) = &current {
             let status = addon_status(&project.dir, locked).context("could not read the addon")?;
-            if locked.rev == sha && status == AddonStatus::Installed {
-                ctx.info(format!("{name} is up to date ({})", short(&sha)));
+            if locked.rev == rev && status == AddonStatus::Installed {
+                ctx.info(format!("{name} is up to date ({})", short(&rev)));
                 continue;
             }
             if status == AddonStatus::Modified && !args.force {
                 return Err(AddonError::Modified { name }.into());
             }
         }
-        let fetched = install_github(
-            &http,
-            &dirs,
-            &project.dir,
-            &InstallPlan {
-                source: &source,
-                sha: &sha,
-                subdir: entry.subdir.as_deref(),
-                name: Some(&name),
-                replace: true,
-            },
+        let fetched = fetch(
+            project,
+            &pinned,
+            entry.subdir.as_deref(),
+            Some(&name),
+            true,
             &mut progress,
         )?;
         let from = current
@@ -523,15 +810,59 @@ fn update(project: &Project, ctx: &Ctx, args: &UpdateArgs) -> Result<()> {
             .unwrap_or_else(|| "-".into());
         lock.upsert(LockedAddon {
             name: name.clone(),
-            source: source.lock_name(),
-            rev: sha.clone(),
+            source: pinned.lock_name(),
+            rev: rev.clone(),
             subdir: fetched.subdir,
             hash: fetched.hash,
         });
         lock.save(&project.lock)?;
-        ctx.info(format!("Updated {name}: {from} -> {}", short(&sha)));
+        ctx.info(format!("Updated {name}: {from} -> {}", short(&rev)));
     }
     project.update_gitignore(manifest.git_mode, &lock)?;
+    Ok(())
+}
+
+/// `gdt addon search`: works anywhere; inside a project it prefers what works
+/// with the project's Godot.
+fn search(args: &SearchArgs) -> Result<()> {
+    let http = http_client();
+    let engine = Project::find().ok().and_then(|p| p.engine_version());
+    let hits: Vec<SearchHit> = if args.library {
+        library_search(&http, &args.text, engine.as_deref())?
+    } else {
+        store_search(&http, &args.text, engine.as_deref())?
+    };
+
+    let price = |hit: &SearchHit| match hit.price_cent {
+        Some(0) => "free".to_string(),
+        Some(_) => "paid".to_string(),
+        None => String::new(),
+    };
+    if args.json {
+        let items: Vec<_> = hits
+            .iter()
+            .map(|h| {
+                json!({
+                    "id": h.id, "name": h.name, "license": h.license,
+                    "price": price(h), "detail": h.detail,
+                })
+            })
+            .collect();
+        println!("{}", json!({ "results": items }));
+    } else if hits.is_empty() {
+        println!("Nothing found for `{}`.", args.text);
+    } else {
+        for hit in &hits {
+            let extra = hit.detail.clone().unwrap_or_else(|| price(hit));
+            println!(
+                "{:<40} {:<32} {:<14} {}",
+                hit.id,
+                hit.name,
+                hit.license.clone().unwrap_or_default(),
+                extra
+            );
+        }
+    }
     Ok(())
 }
 

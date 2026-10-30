@@ -50,6 +50,12 @@ struct Raw {
 pub struct AddonEntry {
     /// `owner/repo` on GitHub.
     pub github: Option<String>,
+    /// `publisher/asset` in the Godot Asset Store.
+    pub store: Option<String>,
+    /// The id of an asset in the legacy Godot Asset Library.
+    pub library: Option<String>,
+    /// For the Store, the release to use (the newest compatible one when absent).
+    pub version: Option<String>,
     /// A tag, branch or commit; the default branch when none is given.
     #[serde(rename = "ref")]
     pub git_ref: Option<String>,
@@ -173,6 +179,15 @@ pub fn set_addon(path: &Path, name: &str, entry: &AddonEntry) -> Result<(), Mani
     let mut table = Table::new();
     if let Some(github) = &entry.github {
         table["github"] = value(github.as_str());
+    }
+    if let Some(store) = &entry.store {
+        table["store"] = value(store.as_str());
+    }
+    if let Some(library) = &entry.library {
+        table["library"] = value(library.as_str());
+    }
+    if let Some(version) = &entry.version {
+        table["version"] = value(version.as_str());
     }
     if let Some(git_ref) = &entry.git_ref {
         table["ref"] = value(git_ref.as_str());
@@ -342,6 +357,33 @@ git = \"sometimes\"
     }
 
     #[test]
+    fn store_and_library_entries_round_trip() {
+        let dir = scratch("manifest-stores");
+        let path = dir.join(MANIFEST_FILE);
+        let store = AddonEntry {
+            store: Some("nathanhoad/dialogue-manager".into()),
+            version: Some("v4.1.0".into()),
+            ..AddonEntry::default()
+        };
+        let library = AddonEntry {
+            library: Some("5385".into()),
+            ..AddonEntry::default()
+        };
+        set_addon(&path, "dialogue-manager", &store).unwrap();
+        set_addon(&path, "ddsl", &library).unwrap();
+        let manifest = Manifest::read(&path).unwrap();
+        assert_eq!(manifest.addons["dialogue-manager"], store);
+        assert_eq!(manifest.addons["ddsl"], library);
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("store = \"nathanhoad/dialogue-manager\""),
+            "{text}"
+        );
+        assert!(text.contains("library = \"5385\""), "{text}");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn set_and_remove_an_addon_keep_everything_else() {
         let dir = scratch("manifest-set-addon");
         let path = dir.join(MANIFEST_FILE);
@@ -359,6 +401,7 @@ version = \"4.7.2\"  # pinned
             git_ref: Some("v9.4.0".into()),
             subdir: Some("addons/gut".into()),
             dev: true,
+            ..AddonEntry::default()
         };
         set_addon(&path, "gut", &entry).unwrap();
         let text = fs::read_to_string(&path).unwrap();

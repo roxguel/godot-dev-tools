@@ -17,9 +17,9 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
-    Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient, HttpError,
-    InstallRequest, Platform, Progress, ReleaseError, ResolveError, ResponseCache, Source,
-    UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
+    AddonError, Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient,
+    HttpError, InstallRequest, Platform, Progress, ReleaseError, ResolveError, ResponseCache,
+    Source, UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
     install_build,
 };
 use serde_json::json;
@@ -240,6 +240,16 @@ fn exit_code(error: &anyhow::Error) -> u8 {
         return match error {
             ResolveError::Version(_) => 2,
             ResolveError::NotInstalled { .. } | ResolveError::NothingSelected => 4,
+            _ => 1,
+        };
+    }
+    if let Some(error) = error.downcast_ref::<AddonError>() {
+        return match error {
+            AddonError::BadSource(_) | AddonError::BadName(_) => 2,
+            AddonError::Http(_) => 3,
+            AddonError::NotFound(_) => 4,
+            AddonError::HashMismatch { .. } => 5,
+            AddonError::Paid { .. } => 6,
             _ => 1,
         };
     }
