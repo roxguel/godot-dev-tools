@@ -1,4 +1,6 @@
+mod open;
 mod progress;
+mod select;
 mod verbose;
 
 use std::env;
@@ -11,8 +13,9 @@ use anyhow::Result;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
     Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient, HttpError,
-    InstallRequest, Platform, Progress, Release, ReleaseError, ResponseCache, Source, UreqClient,
-    Version, VersionError, VersionSpec, fetch_releases, find_project_file, install_build,
+    InstallRequest, Platform, Progress, Release, ReleaseError, ResolveError, ResponseCache, Source,
+    UreqClient, Version, VersionError, VersionSpec, fetch_releases, find_project_file,
+    install_build,
 };
 use serde_json::json;
 
@@ -37,6 +40,10 @@ struct Cli {
     #[arg(short, long, global = true, action = ArgAction::Count)]
     verbose: u8,
 
+    /// Use this installed Godot build for this command, whatever the project asks for
+    #[arg(long, global = true, value_name = "SPEC")]
+    godot: Option<String>,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -56,8 +63,12 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Show where gdt keeps its files
-    Paths,
+    /// Show where gdt keeps its files, or open one of them
+    Paths {
+        /// Open this folder or file in the file manager
+        #[arg(long, value_enum, value_name = "WHAT")]
+        open: Option<open::Place>,
+    },
     /// There is no top-level `add`
     #[command(hide = true)]
     Add {
@@ -74,6 +85,16 @@ enum EngineShortcut {
     /// List Godot builds: installed ones, or with --remote the ones you can install
     #[command(visible_alias = "ls")]
     List(ListArgs),
+    /// Remove an installed Godot build
+    Uninstall(select::UninstallArgs),
+    /// Choose the default Godot build, or show it
+    #[command(name = "use")]
+    UseBuild(select::UseArgs),
+    /// Record the Godot build a project uses, in its gdt.toml
+    #[command(name = "pin")]
+    Pin(select::PinArgs),
+    /// Show which Godot executable would run here
+    Which(select::WhichArgs),
 }
 
 #[derive(Subcommand)]
@@ -118,6 +139,8 @@ struct ListArgs {
 struct Ctx {
     style: Style,
     quiet: bool,
+    /// The `--godot` flag.
+    godot: Option<String>,
 }
 
 impl Ctx {
@@ -158,6 +181,13 @@ fn exit_code(error: &anyhow::Error) -> u8 {
     {
         return 2;
     }
+    if let Some(error) = error.downcast_ref::<ResolveError>() {
+        return match error {
+            ResolveError::Version(_) => 2,
+            ResolveError::NotInstalled { .. } | ResolveError::NothingSelected => 4,
+            _ => 1,
+        };
+    }
     if error.downcast_ref::<HttpError>().is_some() {
         return 3;
     }
@@ -170,7 +200,11 @@ fn exit_code(error: &anyhow::Error) -> u8 {
     }
     match error.downcast_ref::<EngineError>() {
         Some(EngineError::Http(_)) => 3,
-        Some(EngineError::VersionNotFound(_) | EngineError::NoBuild(_)) => 4,
+        Some(
+            EngineError::VersionNotFound(_)
+            | EngineError::NotInstalled(_)
+            | EngineError::NoBuild(_),
+        ) => 4,
         Some(
             EngineError::ChecksumMismatch { .. }
             | EngineError::NoChecksum(_)
@@ -191,6 +225,7 @@ fn run(cli: Cli) -> Result<()> {
     let ctx = Ctx {
         style: Style::resolve(arg, cli.quiet),
         quiet: cli.quiet,
+        godot: cli.godot,
     };
 
     match cli.command {
@@ -204,7 +239,7 @@ fn run(cli: Cli) -> Result<()> {
             command: EngineCommand::Shortcut(command),
         }) => engine(command, &ctx),
         Some(Command::Inspect { path }) => inspect(&path),
-        Some(Command::Paths) => paths(),
+        Some(Command::Paths { open }) => paths(open, &ctx),
         Some(Command::Add { .. }) => Err(UsageError(
             "there is no `gdt add`; use `gdt addon add <source>` to add an addon, \
              or `gdt install <version>` to install a Godot build"
@@ -218,6 +253,10 @@ fn engine(command: EngineShortcut, ctx: &Ctx) -> Result<()> {
     match command {
         EngineShortcut::Install(args) => install(&args, ctx),
         EngineShortcut::List(args) => list(&args, ctx),
+        EngineShortcut::Uninstall(args) => select::uninstall(&args, ctx),
+        EngineShortcut::UseBuild(args) => select::use_build(&args, ctx),
+        EngineShortcut::Pin(args) => select::pin_build(&args, ctx),
+        EngineShortcut::Which(args) => select::which(&args, ctx),
     }
 }
 
@@ -233,8 +272,13 @@ fn inspect(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn paths() -> Result<()> {
+fn paths(open_what: Option<open::Place>, ctx: &Ctx) -> Result<()> {
     let dirs = Dirs::detect()?;
+    if let Some(place) = open_what {
+        let shown = open::open_place(place, &dirs)?;
+        ctx.info(format!("Opened {}", shown.display()));
+        return Ok(());
+    }
     println!("data:     {}", dirs.data_dir().display());
     println!("config:   {}", dirs.config_file().display());
     println!("versions: {}", dirs.versions_dir().display());
