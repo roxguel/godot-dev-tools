@@ -23,9 +23,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Change {
     Added,
+    /// Only the Windows `PATH` text can have its entry moved or missing; the
+    /// Unix profile code never builds these two.
+    #[cfg_attr(not(any(windows, test)), allow(dead_code))]
     MovedToFront,
     AlreadyFirst,
     Removed,
+    #[cfg_attr(not(any(windows, test)), allow(dead_code))]
     NotPresent,
 }
 
