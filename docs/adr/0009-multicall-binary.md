@@ -20,7 +20,7 @@ Shim mode:
 
 The separate `gdt-shim` crate is removed. `gdt shim status` reports whether the copy is up to date (a `cargo install` of a newer `gdt` leaves the Windows copy old until `gdt shim install` is run again), whether the bin folder is on `PATH`, and which `godot` would actually run.
 
-`gdt` does not change `PATH` by itself. It prints what to add. `--modify-path` is left out until the user has agreed how to edit the Windows user `Path` without flattening its `REG_EXPAND_SZ` entries.
+`gdt` never changes `PATH` on its own. `gdt shim install --modify-path` does it when the user asks (and `gdt shim uninstall --modify-path` undoes it); see [version-management.md](../specs/version-management.md). Without the flag it prints what to add.
 
 `godot-mono` is not provided: the build follows the resolution (a C# project picks the .NET build, and `GDT_VERSION=4.7.2-mono` forces it).
 
