@@ -165,6 +165,30 @@ pub enum Target {
     Line { major: u32, minor: u32 },
     /// One exact release, including pre-releases.
     Exact(Version),
+    /// The newest published build of one pre-release channel (`beta`, `rc`, `dev`).
+    Channel(ChannelKind),
+    /// The newest pre-release of any channel (`pre`).
+    Pre,
+}
+
+/// A pre-release channel without its number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelKind {
+    Dev,
+    Beta,
+    Rc,
+}
+
+impl Channel {
+    /// The pre-release channel, or `None` for stable.
+    pub fn kind(&self) -> Option<ChannelKind> {
+        match self {
+            Self::Dev(_) => Some(ChannelKind::Dev),
+            Self::Beta(_) => Some(ChannelKind::Beta),
+            Self::Rc(_) => Some(ChannelKind::Rc),
+            Self::Stable => None,
+        }
+    }
 }
 
 /// A version as typed by a user: `latest`, `4.7`, `4.7.1`, `4.8-rc1`, each with an
@@ -188,6 +212,26 @@ impl VersionSpec {
                 .max()
                 .copied(),
             Target::Exact(wanted) => available.into_iter().find(|v| **v == wanted).copied(),
+            Target::Channel(kind) => available
+                .into_iter()
+                .filter(|v| v.channel.kind() == Some(kind))
+                .max()
+                .copied(),
+            Target::Pre => available
+                .into_iter()
+                .filter(|v| v.channel != Channel::Stable)
+                .max()
+                .copied(),
+        }
+    }
+
+    /// Whether the releases this spec can stand for live in the pre-release
+    /// repository (`godot-builds`) rather than the stable one.
+    pub fn needs_pre_releases(&self) -> bool {
+        match self.target {
+            Target::Latest | Target::Line { .. } => false,
+            Target::Exact(v) => v.channel != Channel::Stable,
+            Target::Channel(_) | Target::Pre => true,
         }
     }
 }
@@ -208,6 +252,14 @@ impl FromStr for VersionSpec {
 
         let target = if text == "latest" {
             Target::Latest
+        } else if text == "beta" {
+            Target::Channel(ChannelKind::Beta)
+        } else if text == "rc" {
+            Target::Channel(ChannelKind::Rc)
+        } else if text == "dev" {
+            Target::Channel(ChannelKind::Dev)
+        } else if text == "pre" {
+            Target::Pre
         } else if text.contains('-') {
             Target::Exact(Version::from_tag(text)?)
         } else {
@@ -369,6 +421,33 @@ mod tests {
         assert_eq!(spec("4.6").pick(&all), Some(v("4.6.3-stable")));
         assert_eq!(spec("4.7.1").pick(&all), Some(v("4.7.1-stable")));
         assert_eq!(spec("4.5").pick(&all), None);
+    }
+
+    #[test]
+    fn channel_aliases_pick_the_newest_of_that_channel() {
+        let all = [
+            v("4.7.2-stable"),
+            v("4.8-dev7"),
+            v("4.8-beta1"),
+            v("4.8-beta2"),
+            v("4.8-rc1"),
+        ];
+        assert_eq!(spec("beta").pick(&all), Some(v("4.8-beta2")));
+        assert_eq!(spec("rc").pick(&all), Some(v("4.8-rc1")));
+        assert_eq!(spec("dev").pick(&all), Some(v("4.8-dev7")));
+        assert_eq!(spec("pre").pick(&all), Some(v("4.8-rc1")));
+        assert_eq!(spec("beta-mono").flavor, Flavor::Dotnet);
+        assert_eq!(spec("rc").pick(&[v("4.7.2-stable")]), None);
+    }
+
+    #[test]
+    fn specs_know_which_repository_they_need() {
+        assert!(!spec("latest").needs_pre_releases());
+        assert!(!spec("4.7").needs_pre_releases());
+        assert!(!spec("4.7.2").needs_pre_releases());
+        assert!(spec("4.8-rc1").needs_pre_releases());
+        assert!(spec("beta").needs_pre_releases());
+        assert!(spec("pre").needs_pre_releases());
     }
 
     #[test]

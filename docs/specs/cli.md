@@ -15,7 +15,9 @@ A top-level word that belongs to another group fails with a hint: `gdt add 4.0` 
 
 ## Global flags
 
-`--progress <auto|rich|plain|none>`, `--quiet`, `--color <auto|always|never>`, `--verbose`, `--json` (commands that print data), `--godot <version>` (override the resolved engine for this command).
+`--progress <auto|rich|plain|none>`, `-q`/`--quiet`, `-v`/`--verbose`, `--color <auto|always|never>`, `--json` (commands that print data), `--godot <version>` (override the resolved engine for this command).
+
+`-v` prints diagnostics on stderr, prefixed `[debug]`: what is being resolved, URLs requested and their HTTP status, cache hits, the asset chosen, checksums, folders used. `-vv` adds what the underlying libraries log (HTTP and TLS). Progress switches to plain lines while `-v` is on, so the diagnostics stay readable. Tokens and other secrets are never logged. The library reports diagnostics through the `log` crate and the CLI decides whether to show them.
 
 ## Output and progress
 

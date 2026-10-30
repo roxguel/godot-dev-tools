@@ -1,10 +1,13 @@
 //! A small HTTP layer so the rest of the library can be tested without a network.
 
+use std::io::{Read, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const GITHUB_API: &str = "https://api.github.com/";
 const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const CHUNK_BYTES: usize = 64 * 1024;
 
 /// Errors from an HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -39,6 +42,16 @@ impl HttpResponse {
 pub trait HttpClient {
     /// Fetches `url`. Only 2xx answers are returned as `Ok`.
     fn get(&self, url: &str) -> Result<HttpResponse, HttpError>;
+
+    /// Streams `url` into `sink` without holding it in memory, for large files.
+    /// `on_chunk(total, read)` is called after each chunk with the size announced
+    /// by the server, when known, and the number of bytes just written.
+    fn download(
+        &self,
+        url: &str,
+        sink: &mut dyn Write,
+        on_chunk: &mut dyn FnMut(Option<u64>, u64),
+    ) -> Result<(), HttpError>;
 }
 
 fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
@@ -90,6 +103,8 @@ fn now_secs() -> u64 {
 /// The real client, built on `ureq` (TLS through rustls and `ring`).
 pub struct UreqClient {
     agent: ureq::Agent,
+    /// Without an overall timeout, so a large download is not cut off.
+    download_agent: ureq::Agent,
     token: Option<String>,
 }
 
@@ -102,10 +117,33 @@ impl UreqClient {
             .http_status_as_error(false)
             .timeout_global(Some(TIMEOUT))
             .build();
+        let download_config = ureq::Agent::config_builder()
+            .user_agent(user_agent)
+            .http_status_as_error(false)
+            .timeout_connect(Some(CONNECT_TIMEOUT))
+            .timeout_recv_response(Some(TIMEOUT))
+            .build();
         Self {
             agent: config.into(),
+            download_agent: download_config.into(),
             token,
         }
+    }
+
+    /// Adds the headers a request to `url` needs. The GitHub token is sent only
+    /// to the GitHub API.
+    fn prepare<B>(
+        &self,
+        mut request: ureq::RequestBuilder<B>,
+        url: &str,
+    ) -> ureq::RequestBuilder<B> {
+        if url.starts_with(GITHUB_API) {
+            request = request.header("Accept", "application/vnd.github+json");
+            if let Some(token) = &self.token {
+                request = request.header("Authorization", &format!("Bearer {token}"));
+            }
+        }
+        request
     }
 }
 
@@ -116,21 +154,14 @@ impl HttpClient for UreqClient {
             message: e.to_string(),
         };
 
-        let mut request = self.agent.get(url);
-        if url.starts_with(GITHUB_API) {
-            request = request.header("Accept", "application/vnd.github+json");
-            if let Some(token) = &self.token {
-                request = request.header("Authorization", &format!("Bearer {token}"));
-            }
-        }
-
-        let mut response = request.call().map_err(network)?;
+        log::debug!("GET {url}");
+        let mut response = self
+            .prepare(self.agent.get(url), url)
+            .call()
+            .map_err(network)?;
         let status = response.status().as_u16();
-        let headers: Vec<(String, String)> = response
-            .headers()
-            .iter()
-            .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
-            .collect();
+        log::debug!("  -> HTTP {status}");
+        let headers = header_pairs(&response);
         check_status(url, status, &headers)?;
 
         let body = response
@@ -145,6 +176,51 @@ impl HttpClient for UreqClient {
             body,
         })
     }
+
+    fn download(
+        &self,
+        url: &str,
+        sink: &mut dyn Write,
+        on_chunk: &mut dyn FnMut(Option<u64>, u64),
+    ) -> Result<(), HttpError> {
+        let network = |message: String| HttpError::Network {
+            url: url.to_string(),
+            message,
+        };
+
+        log::debug!("GET {url} (download)");
+        let mut response = self
+            .prepare(self.download_agent.get(url), url)
+            .call()
+            .map_err(|e| network(e.to_string()))?;
+        let status = response.status().as_u16();
+        log::debug!("  -> HTTP {status}");
+        let headers = header_pairs(&response);
+        check_status(url, status, &headers)?;
+
+        let total = header_value(&headers, "content-length").and_then(|v| v.parse().ok());
+        let mut reader = response.body_mut().as_reader();
+        let mut buffer = vec![0u8; CHUNK_BYTES];
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .map_err(|e| network(e.to_string()))?;
+            if read == 0 {
+                return Ok(());
+            }
+            sink.write_all(&buffer[..read])
+                .map_err(|e| network(format!("could not write the download: {e}")))?;
+            on_chunk(total, read as u64);
+        }
+    }
+}
+
+fn header_pairs(response: &ureq::http::Response<ureq::Body>) -> Vec<(String, String)> {
+    response
+        .headers()
+        .iter()
+        .filter_map(|(k, v)| Some((k.as_str().to_string(), v.to_str().ok()?.to_string())))
+        .collect()
 }
 
 #[cfg(test)]

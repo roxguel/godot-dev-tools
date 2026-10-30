@@ -8,7 +8,7 @@ Addons are declared in the project's `gdt.toml` and pinned in `gdt.lock`; both a
 
 ```toml
 [addons]
-git = "ignore"                  # "ignore" (default) or "track": see "Git and the addons folder"
+git = "managed"                 # "managed" (default), "track" or "ignore": see "Git and the addons folder"
 
 [addons.cogito]
 store = "philip-drobar/cogito"  # Asset Store: publisher/asset
@@ -36,7 +36,7 @@ sha256 = "..."                  # required for url sources
 |---|---|---|
 | Godot Asset Store (default) | `gdt addon add publisher/asset`, `store:publisher/asset` | Public API. Assets are identified by `publisher/asset` slugs, not numbers. Each release has `min_godot_version` and `max_godot_version`, so `gdt` picks the release compatible with the project's engine |
 | Godot Asset Library (legacy) | `library:1234` | REST API; numeric ids |
-| GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `tag`, `branch` or `rev`. `subdir` selects the addon folder inside the repo |
+| GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `tag`, `branch` or `rev`. `subdir` selects the addon folder inside the repo. Private repositories need a token: see [authentication.md](authentication.md) |
 | URL | `https://example.com/x.zip` | Archive with a mandatory checksum |
 | Path | `path:../my-addon` | Local folder, copied or linked; for development |
 
@@ -48,11 +48,15 @@ The Asset Store publishes **no checksum** for a release. `gdt` records the hash 
 
 ## Git and the addons folder
 
-Unlike `node_modules`, `addons/` is part of how Godot opens a project, so the default is a compromise: **only the folders `gdt` manages are ignored**, through a block `gdt` maintains in `.gitignore`. Addons added by hand, or modified by you, stay in Git.
+Unlike `node_modules`, `addons/` is part of how Godot opens a project, so there are three modes, chosen with `[addons] git`:
 
-- `[addons] git = "ignore"` (default): managed addons are restored by `gdt sync` or `gdt addon install`. A fresh clone needs the network and that command before the editor opens cleanly.
-- `[addons] git = "track"`: the addon folders are committed; the project opens without `gdt`. The lockfile still records and verifies hashes.
-- `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given.
+| Mode | What Git sees | When to use it |
+|---|---|---|
+| `managed` (default) | Only the folders `gdt` installed are ignored, through a block `gdt` maintains in `.gitignore`. Addons added by hand, or modified by you, stay in Git | Most projects: reproducible installs without losing hand-made addons |
+| `track` | Nothing is ignored; every addon folder is committed | The project must open without `gdt` or without a network. The lockfile still records and verifies hashes |
+| `ignore` | The whole `addons/` folder is ignored; everything must come from `gdt` | Projects whose addons are all declared in `gdt.toml`. `gdt` warns when `addons/` holds a folder it does not manage, because that folder would not be in Git |
+
+In `managed` and `ignore`, `gdt sync` or `gdt addon install` restores the addons: a fresh clone needs the network and that command before the editor opens cleanly. `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given.
 
 ## Installation rules
 

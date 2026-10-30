@@ -94,6 +94,7 @@ There is a single `version` field; the flavor is the `-mono` suffix. The project
 
 ## Opening and running
 
+- On Windows a build has two executables: `Godot_v..._win64.exe` (the editor, a GUI program) and `Godot_v..._win64_console.exe` (keeps a terminal attached). Output only reaches a terminal from the console one, so `gdt run` and the shim use the console executable and `gdt open` uses the editor one. Verified on 4.7.2, whose zip holds just these two files at the root; the Linux, macOS and .NET layouts are still to verify.
 - `gdt open <path>`: resolve for the project, start the editor (`--editor --path <project>`), detach from the terminal, return immediately. Outside a project, or with `--manager`, it starts Godot's project manager with the global default build.
 - `gdt run -- <args>`: resolve, run in the foreground in the current directory, forward stdin/stdout/stderr and the exit code. `gdt run script.gd` is the shortcut for `--headless -s script.gd` (the script must extend `SceneTree` or `MainLoop`).
 - `gdt engine info`: the executable, the version, the flavor, the editor settings folder (per user, shared by builds of the same major version, to verify), the project's `.godot/` folder, and whether the build is self-contained (a `_sc_` file next to the executable makes Godot keep its data beside it; to verify).
