@@ -1,19 +1,26 @@
 # Addons
 
-Status: Draft
+Status: Draft. The Asset Store details come from its OpenAPI document (see [authentication.md](authentication.md)).
 
 ## Manifest and lockfile
 
-Addons are declared in the project's `gdt.toml` and pinned in `gdt.lock`, both committed.
+Addons are declared in the project's `gdt.toml` and pinned in `gdt.lock`; both are committed.
 
 ```toml
+[addons]
+git = "ignore"                  # "ignore" (default) or "track": see "Git and the addons folder"
+
+[addons.cogito]
+store = "philip-drobar/cogito"  # Asset Store: publisher/asset
+version = "1.2.0"
+
 [addons.gut]
-git = "https://github.com/bitwes/Gut"
+github = "bitwes/Gut"
 tag = "v9.4.0"
-subdir = "addons/gut"          # folder inside the repo to copy into addons/<name>/
+subdir = "addons/gut"           # folder inside the repo to copy into addons/<name>/
 
 [addons.some-lib]
-asset-library = "1234"          # legacy Asset Library asset id
+library = "1234"                # legacy Asset Library asset id
 version = "2.1"
 
 [addons.other]
@@ -21,30 +28,41 @@ url = "https://example.com/other-1.0.zip"
 sha256 = "..."                  # required for url sources
 ```
 
-`gdt.lock` records the exact resolved source: commit SHA for git, asset id plus version and download URL for stores, content hash of the extracted files for all. `gdt install` reproduces the lock exactly and fails if a hash does not match.
+`gdt.lock` records the exact resolved source: commit SHA for GitHub, release id and download details for stores, plus the content hash of the extracted files for every source. `gdt addon install` reproduces the lock exactly and fails if a hash does not match.
 
 ## Sources
 
-| Source | Notes |
-|---|---|
-| `git` | Any public (or accessible via the user's git) repository, by `tag`, `branch` or `rev`. `subdir` selects which folder of the repo is the addon; if absent and the repo has a single folder under `addons/`, that one is used |
-| `asset-library` | The legacy Godot Asset Library (REST API) |
-| `asset-store` | The new Godot Asset Store; depends on research ([open-questions.md](../open-questions.md)) |
-| `url` | A zip or tarball with a mandatory checksum |
-| `path` | A local folder, copied or symlinked; for development |
+| Source | Command form | Notes |
+|---|---|---|
+| Godot Asset Store (default) | `gdt addon add publisher/asset`, `store:publisher/asset` | Public API. Assets are identified by `publisher/asset` slugs, not numbers. Each release has `min_godot_version` and `max_godot_version`, so `gdt` picks the release compatible with the project's engine |
+| Godot Asset Library (legacy) | `library:1234` | REST API; numeric ids |
+| GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `tag`, `branch` or `rev`. `subdir` selects the addon folder inside the repo |
+| URL | `https://example.com/x.zip` | Archive with a mandatory checksum |
+| Path | `path:../my-addon` | Local folder, copied or linked; for development |
 
-Shorthand on the command line: `gdt add github:owner/repo@tag`, `gdt add gitlab:owner/repo`, `gdt add asset-library:1234`.
+A bare `publisher/asset` always means the Asset Store. GitHub must be spelled `github:` (or a full URL), so the two forms never collide.
+
+## Integrity
+
+The Asset Store publishes **no checksum** for a release. `gdt` records the hash of the downloaded archive in `gdt.lock` the first time (trust on first use) and verifies every later install against it. GitHub sources are pinned by commit SHA.
+
+## Git and the addons folder
+
+Unlike `node_modules`, `addons/` is part of how Godot opens a project, so the default is a compromise: **only the folders `gdt` manages are ignored**, through a block `gdt` maintains in `.gitignore`. Addons added by hand, or modified by you, stay in Git.
+
+- `[addons] git = "ignore"` (default): managed addons are restored by `gdt sync` or `gdt addon install`. A fresh clone needs the network and that command before the editor opens cleanly.
+- `[addons] git = "track"`: the addon folders are committed; the project opens without `gdt`. The lockfile still records and verifies hashes.
+- `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given.
 
 ## Installation rules
 
-- An addon is installed into `addons/<name>/` of the project. Nothing outside `addons/` is written, except the files `gdt` itself owns (`gdt.toml`, `gdt.lock`).
-- Enabling the plugin (`editor_plugins/enabled` in `project.godot`) is **not** done automatically; `gdt add` prints the line the user should add, or enables it with `--enable`.
-- Installed addon folders are treated as vendored: `gdt` records a hash, and refuses to overwrite local modifications without `--force`.
-- Whether `addons/` is committed or git-ignored is the project's choice. With a lockfile, either works.
-- No transitive dependencies in the first version. An addon's own needs are documented by the addon.
+- An addon is installed into `addons/<name>/`. Nothing outside `addons/` is written, except the files `gdt` owns (`gdt.toml`, `gdt.lock`, and its `.gitignore` block).
+- Enabling the plugin (`editor_plugins/enabled` in `project.godot`) is **not** done automatically; `gdt addon add` prints the line to add, or enables it with `--enable`.
+- No transitive dependencies in the first version.
+- Paid assets are never purchased by `gdt`; see [authentication.md](authentication.md).
 
 ## Open design points
 
-- Handling addons that ship extra top-level files (GDExtension binaries, `.gdextension` files per platform).
-- Submodule support for git sources.
-- Authentication for private git repositories: delegate to the user's git configuration.
+- Addons that ship extra top-level files (GDExtension binaries, `.gdextension` per platform).
+- Submodule support for GitHub sources.
+- Private repositories: delegate to the user's git configuration.

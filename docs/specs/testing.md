@@ -17,9 +17,11 @@ report = "junit"                # writes target/gdt/test-report.xml
 ## Detection
 
 1. `[test] runner` if set.
-2. `addons/gdUnit4` present: gdUnit4.
-3. `addons/gut` present: GUT.
+2. `addons/gdUnit4/plugin.cfg` present: gdUnit4.
+3. `addons/gut/plugin.cfg` present: GUT.
 4. `[test] script`: a user script run with `--headless --script`, which must exit non-zero on failure.
+
+If both GUT and gdUnit4 are present, `[test] runner` is required and `gdt test` says so. GUT is the first runner documented and tested (GDScript, simple command line); gdUnit4 comes second. A project with its own harness, such as Project Cozy's `tools/tests/run_suites.gd`, uses `runner = "script"`.
 
 ## Behavior
 
