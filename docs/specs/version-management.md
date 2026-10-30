@@ -105,6 +105,16 @@ There is a single `version` field; the flavor is the `-mono` suffix. The project
 Two ways to invoke Godot (ADR 0006):
 
 1. **Explicit:** `gdt run -- ...`. No setup beyond `gdt` itself.
-2. **Shim:** `gdt shim install` places a small `godot` executable in `<data>/gdt/bin` and tells the user to put that folder on `PATH` (it never edits shell profiles or the registry unless asked with `--modify-path`). The shim resolves exactly as `gdt run` does and `exec`s the real Godot, forwarding arguments, environment and exit code. On Unix it uses `exec`; on Windows it is a separate tiny `.exe` that spawns and waits, since there are no unprivileged symlinks.
+2. **Shim:** `gdt shim install` puts a `godot` in `<data>/bin` and says what to add to `PATH` (it never edits `PATH`, shell profiles or the registry). The shim is `gdt` itself started under the name `godot` (ADR 0009): a symbolic link on Unix, a copy on Windows.
 
-The shim never prints anything of its own on success, so scripts that parse Godot's output are unaffected. On failure it prints a message prefixed with `gdt:` to stderr.
+In shim mode:
+
+- Every argument goes to Godot untouched, including `-v`, `-h` and `--version`, which are Godot's. Nothing is parsed by `gdt`.
+- The build is resolved as for `gdt run` (project from `--path` or the current folder, `GDT_VERSION`, `gdt.toml`, `project.godot`, the default); there is no `--godot` flag. It never uses the network and never installs anything.
+- Nothing is printed on success. A failure prints `gdt: <message>` on stderr and exits with 4 (build not installed or none selected), 2 (bad `GDT_VERSION`) or 1.
+- Godot's exit code is returned unchanged, as a full 32-bit value. On Unix the shim replaces itself with Godot; on Windows it runs the console executable and ignores Ctrl+C, which Godot receives too, so that Godot ends first.
+- It refuses to run if the build's executable turns out to be the shim itself.
+
+`gdt shim status` prints whether the shim is installed and up to date, whether its folder is on `PATH` and at which entry, and which `godot` would run (checking `PATHEXT` on Windows). A `godot` earlier on `PATH` than the shim wins, and on Windows the system `Path` comes before the user `Path`, so `status` is the thing to check. A newer `gdt` leaves the Windows copy old until `gdt shim install` is run again; while a Godot started through the shim is open, Windows will not let the file be replaced, and `gdt` says so.
+
+Why a plain `godot --version` follows `gdt use`: only with the shim installed and its folder first on `PATH`. Without it, `gdt run -- --version` shows the same.
