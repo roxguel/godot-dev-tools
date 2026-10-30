@@ -70,5 +70,5 @@ A `github:` source in a private repository needs a token with read access to it.
 ## Behavior
 
 - Free assets never need a token; `gdt addon add` works signed out.
-- If an asset needs a purchase or a token the user does not have, the error says so, shows the asset's `store_url`, and exits with code 6. `gdt` never buys anything.
+- A paid asset (`price_cent` above zero) is refused before anything is downloaded: the error says so, shows the asset's `store_url` and exits with code 6 (implemented). `gdt` never buys anything. Using a token to download a purchased asset is not implemented yet.
 - With a token, it is sent when requesting releases of a paid asset (*unverified* that this is what the API expects; to be confirmed with an account before implementing).

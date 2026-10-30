@@ -101,7 +101,7 @@ See [addons.md](addons.md). Always under `gdt addon`.
 | `remove` / `rm` `<name>` | `gdt addon rm gut` | Remove from the manifest, the lockfile and `addons/` |
 | `update [name]` | `gdt addon update` | Look for newer versions and rewrite the lockfile |
 | `list` / `ls` | `gdt addon ls` | Installed addons and where they came from |
-| `search <text>` | `gdt addon search dialogue` | Search the Asset Store and the Asset Library |
+| `search <text>` | `gdt addon search dialogue`, `gdt addon search dialogue --library` | Search the Asset Store (or, with `--library`, the legacy Asset Library). Works anywhere; inside a project it prefers what works with its Godot. Prints a table with a header (`ASSET`, `NAME`, `LICENSE` and `PRICE`, or `VERSION` for the Library): `publisher/asset` (or `library:id`), name, license, and free or paid (or the version and its Godot). `-q` prints only the ids, `-j` JSON |
 
 ## System
 

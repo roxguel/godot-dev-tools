@@ -1,6 +1,6 @@
 # Addons
 
-Status: Draft. The GitHub source, the lockfile and the `.gitignore` block are implemented (`gdt addon add|install|remove|list|update`, `gdt sync`); the Asset Store, the Asset Library, URL and path sources are not yet. The Asset Store details come from its OpenAPI document (see [authentication.md](authentication.md)).
+Status: Draft. Implemented: the Asset Store, the Asset Library and GitHub sources, the lockfile and the `.gitignore` block (`gdt addon add|install|remove|list|update|search`, `gdt sync`). Not yet: URL and path sources, and signing in to the Store (paid assets).
 
 ## Manifest and lockfile
 
@@ -12,7 +12,7 @@ git = "managed"                 # "managed" (default), "track" or "ignore": see 
 
 [addons.cogito]
 store = "philip-drobar/cogito"  # Asset Store: publisher/asset
-version = "1.2.0"
+version = "1.2.0"               # optional: without it, the newest compatible stable release
 
 [addons.gut]
 github = "bitwes/Gut"
@@ -38,8 +38,8 @@ dev = true                      # needed to work on the project, not shipped: se
 
 | Source | Command form | Notes |
 |---|---|---|
-| Godot Asset Store (default) | `gdt addon add publisher/asset`, `store:publisher/asset` | Public API. Assets are identified by `publisher/asset` slugs, not numbers. Each release has `min_godot_version` and `max_godot_version`, so `gdt` picks the release compatible with the project's engine |
-| Godot Asset Library (legacy) | `library:1234` | REST API; numeric ids |
+| Godot Asset Store (default) | `gdt addon add publisher/asset`, `store:publisher/asset@version` | Public API, no sign-in for free assets. Assets are `publisher/asset` slugs, not numbers. Without a version, the newest **stable** release that works with the project's Godot (`min_godot_version` and `max_godot_version`, asked through the API's `compatibility` filter); with `@version` (a leading `v` is optional) exactly that release. The lockfile records the release version. A paid asset is refused with its store address (exit code 6): `gdt` never buys anything |
+| Godot Asset Library (legacy) | `library:1234` | REST API; numeric ids. The lockfile records the version the Library lists; if the Library lists another one later, `install` stops and says to run `update`. When the author gave a SHA-256 for the archive, it is checked |
 | GitHub | `github:owner/repo@tag`, or a full `https://github.com/...` URL | By `ref`: a tag, a branch or a commit. `subdir` selects the addon folder inside the repo. Private repositories need a token: see [authentication.md](authentication.md) |
 | URL | `https://example.com/x.zip` | Archive with a mandatory checksum |
 | Path | `path:../my-addon` | Local folder, copied or linked; for development |

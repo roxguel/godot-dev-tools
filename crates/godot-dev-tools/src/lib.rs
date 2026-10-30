@@ -15,12 +15,13 @@ pub mod project;
 pub mod releases;
 pub mod resolve;
 pub mod storage;
+pub mod stores;
 pub mod testing;
 pub mod version;
 
 pub use addons::{
-    AddonError, AddonStatus, Fetched, GithubSource, InstallPlan, addon_status, install_github,
-    remove_addon_dir, resolve_commit,
+    AddonError, AddonStatus, ArchiveJob, Fetched, GithubSource, InstallPlan, addon_status,
+    install_archive, install_github, remove_addon_dir, resolve_commit,
 };
 pub use config::{Config, ConfigError};
 pub use engine::{
@@ -43,6 +44,10 @@ pub use resolve::{
     pick_installed, removal_candidates, resolve,
 };
 pub use storage::{Dirs, Platform, StorageError};
+pub use stores::{
+    LibraryAsset, SearchHit, StoreAsset, StoreInfo, StoreRelease, library_asset, library_search,
+    parse_library_id, pick_release, store_info, store_releases, store_search,
+};
 pub use testing::{
     Outcome, Runner, Summary, TestError, TestPlan, build_plan, detect_runner, judge, parse_junit,
     res_path,

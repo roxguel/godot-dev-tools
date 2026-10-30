@@ -23,7 +23,7 @@ pub enum AddonError {
     #[error("{0}")]
     BadSource(String),
     #[error(
-        "{0} was not found; check the name and the reference (a private repository needs GH_TOKEN)"
+        "{0} was not found; check its name and version (a private GitHub repository needs GH_TOKEN)"
     )]
     NotFound(String),
     #[error("GitHub sent an answer that could not be read: {0}")]
@@ -34,6 +34,12 @@ pub enum AddonError {
     AmbiguousSubdir(Vec<String>),
     #[error("the repository has no folder `{0}`")]
     SubdirMissing(String),
+    #[error("{name} is a paid asset ({price}); gdt cannot buy it. Get it at {url}")]
+    Paid {
+        name: String,
+        price: String,
+        url: String,
+    },
     #[error("`{0}` is not a usable addon name")]
     BadName(String),
     #[error(
@@ -189,35 +195,65 @@ pub struct InstallPlan<'a> {
     pub replace: bool,
 }
 
+/// One archive to download and unpack into `addons/`.
+pub struct ArchiveJob<'a> {
+    /// A name for the cached file, unique to this exact release.
+    pub file_name: String,
+    pub url: String,
+    /// What to call it in messages, for example `bitwes/Gut`.
+    pub label: String,
+    /// The folder name when nothing else says (repository or asset name).
+    pub default_name: &'a str,
+    /// The folder inside the archive, or `None` to find it.
+    pub subdir: Option<&'a str>,
+    /// The folder name under `addons/`, or `None` to take it from the archive.
+    pub name: Option<&'a str>,
+    /// Replace `addons/<name>` if it exists.
+    pub replace: bool,
+    /// The SHA-256 the publisher gave for the archive, to check it against.
+    pub sha256: Option<&'a str>,
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
 fn cached_archive(
     http: &dyn HttpClient,
     dirs: &Dirs,
-    plan: &InstallPlan<'_>,
+    job: &ArchiveJob<'_>,
     progress: &mut dyn Progress,
 ) -> Result<PathBuf, AddonError> {
     let cache = dirs.cache_dir();
-    let archive = cache.join(format!(
-        "github-{}-{}-{}.zip",
-        plan.source.owner, plan.source.repo, plan.sha
-    ));
+    let archive = cache.join(&job.file_name);
     if archive.is_file() {
         log::debug!("using the cached archive {}", archive.display());
         return Ok(archive);
     }
     fs::create_dir_all(&cache).map_err(io_err("could not create the cache folder"))?;
-    let part = cache.join(format!(
-        "{}.part",
-        archive.file_name().unwrap().to_string_lossy()
-    ));
+    let part = cache.join(format!("{}.part", job.file_name));
     let file = File::create(&part).map_err(io_err("could not create the download file"))?;
     let mut writer = BufWriter::new(file);
 
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/zipball/{}",
-        plan.source.owner, plan.source.repo, plan.sha
-    );
-    progress.begin(&format!("Downloading {}", plan.source.slug()), None);
-    let result = http.download(&url, &mut writer, &mut |_total, read| {
+    progress.begin(&format!("Downloading {}", job.label), None);
+    log::debug!("downloading {}", job.url);
+    let result = http.download(&job.url, &mut writer, &mut |_total, read| {
         progress.advance(read)
     });
     let flushed = writer.flush();
@@ -225,9 +261,7 @@ fn cached_archive(
     if let Err(error) = result {
         let _ = fs::remove_file(&part);
         return Err(match error {
-            HttpError::Status { status: 404, .. } => {
-                AddonError::NotFound(format!("{} at {}", plan.source.slug(), plan.sha))
-            }
+            HttpError::Status { status: 404, .. } => AddonError::NotFound(job.label.clone()),
             other => other.into(),
         });
     }
@@ -235,7 +269,18 @@ fn cached_archive(
         let _ = fs::remove_file(&part);
         return Err(io_err("could not write the download")(error));
     }
-    progress.finish(&format!("Downloaded {}", plan.source.slug()));
+    if let Some(expected) = job.sha256.filter(|h| !h.is_empty()) {
+        let actual = sha256_file(&part).map_err(io_err("could not read the download"))?;
+        if !actual.eq_ignore_ascii_case(expected) {
+            let _ = fs::remove_file(&part);
+            return Err(AddonError::HashMismatch {
+                name: job.label.clone(),
+                expected: expected.to_string(),
+                actual,
+            });
+        }
+    }
+    progress.finish(&format!("Downloaded {}", job.label));
     fs::rename(&part, &archive).map_err(io_err("could not store the download"))?;
     Ok(archive)
 }
@@ -292,13 +337,45 @@ pub fn install_github(
     plan: &InstallPlan<'_>,
     progress: &mut dyn Progress,
 ) -> Result<Fetched, AddonError> {
-    let archive = cached_archive(http, dirs, plan, progress)?;
+    install_archive(
+        http,
+        dirs,
+        project_dir,
+        &ArchiveJob {
+            file_name: format!(
+                "github-{}-{}-{}.zip",
+                plan.source.owner, plan.source.repo, plan.sha
+            ),
+            url: format!(
+                "https://api.github.com/repos/{}/{}/zipball/{}",
+                plan.source.owner, plan.source.repo, plan.sha
+            ),
+            label: plan.source.slug(),
+            default_name: &plan.source.repo,
+            subdir: plan.subdir,
+            name: plan.name,
+            replace: plan.replace,
+            sha256: None,
+        },
+        progress,
+    )
+}
+
+/// Downloads an archive and installs the addon in it into `<project>/addons/<name>`.
+pub fn install_archive(
+    http: &dyn HttpClient,
+    dirs: &Dirs,
+    project_dir: &Path,
+    job: &ArchiveJob<'_>,
+    progress: &mut dyn Progress,
+) -> Result<Fetched, AddonError> {
+    let archive = cached_archive(http, dirs, job, progress)?;
     let addons_dir = project_dir.join("addons");
     fs::create_dir_all(&addons_dir).map_err(io_err("could not create the addons folder"))?;
 
     let staging = addons_dir.join(format!(".gdt-tmp-{}", std::process::id()));
     let _ = fs::remove_dir_all(&staging);
-    let result = place(&archive, &addons_dir, &staging, plan);
+    let result = place(&archive, &addons_dir, &staging, job);
     let _ = fs::remove_dir_all(&staging);
     result
 }
@@ -307,12 +384,12 @@ fn place(
     archive: &Path,
     addons_dir: &Path,
     staging: &Path,
-    plan: &InstallPlan<'_>,
+    job: &ArchiveJob<'_>,
 ) -> Result<Fetched, AddonError> {
     extract_zip(archive, staging)?;
     let root = single_root(staging);
 
-    let subdir = match plan.subdir {
+    let subdir = match job.subdir {
         Some(given) => given.trim_matches('/').replace('\\', "/"),
         None => find_subdir(&root)?,
     };
@@ -325,9 +402,9 @@ fn place(
         return Err(AddonError::SubdirMissing(subdir));
     }
 
-    let name = match plan.name {
+    let name = match job.name {
         Some(name) => name.to_string(),
-        None if subdir == "." => plan.source.repo.clone(),
+        None if subdir == "." => job.default_name.to_string(),
         None => subdir.rsplit('/').next().unwrap_or(&subdir).to_string(),
     };
     if !valid_name(&name) {
@@ -336,7 +413,7 @@ fn place(
 
     let target = addons_dir.join(&name);
     if target.exists() {
-        if !plan.replace {
+        if !job.replace {
             return Err(AddonError::Modified { name });
         }
         fs::remove_dir_all(&target).map_err(io_err(format!("could not replace addons/{name}")))?;
