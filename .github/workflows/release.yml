@@ -74,7 +74,7 @@ jobs:
         if: matrix.musl
         run: |
           file "target/${{ matrix.target }}/release/gdt"
-          file "target/${{ matrix.target }}/release/gdt" | grep -q "statically linked"
+          file "target/${{ matrix.target }}/release/gdt" | grep -Eq "statically linked|static-pie linked"
 
       - name: Smoke test
         if: matrix.smoke
