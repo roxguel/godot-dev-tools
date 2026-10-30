@@ -436,6 +436,9 @@ mod tests {
         assert!(is_shim_name(OsStr::new(
             "/home/u/.local/share/gdt/bin/godot"
         )));
+        assert!(is_shim_name(OsStr::new("GODOT.EXE")));
+        // A backslash only separates folders on Windows.
+        #[cfg(windows)]
         assert!(is_shim_name(OsStr::new("C:\\gdt\\bin\\GODOT.EXE")));
         assert!(!is_shim_name(OsStr::new("gdt")));
         assert!(!is_shim_name(OsStr::new("gdt.exe")));
