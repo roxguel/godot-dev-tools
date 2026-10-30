@@ -4,7 +4,7 @@ Status: Draft. Remove an item when it is answered, and record the answer in a sp
 
 ## Research needed
 
-1. **Release assets.** Exact asset names and checksum files for stable builds in `godotengine/godot` and for `rc` / `beta` / `dev` builds in `godotengine/godot-builds`, on each platform, for the standard and the .NET (Mono) flavors. The version spec assumes names like `Godot_v4.7.1-stable_win64.exe.zip`; verify before coding the resolver.
+1. **Pre-release platform coverage.** Asset names were verified for stable builds (see the version spec). For `beta`, `rc` and `dev` in `godotengine/godot-builds`, check which platforms each release actually includes (a beta showed no macOS build) and the archive layout inside the Windows and Linux zips (single executable versus a folder with the .NET assemblies).
 2. **Godot upgrade path.** What is official and scriptable: `--convert-3to4` (3 to 4 only), and for 4.x to 4.y, opening headless with `--import` / `--quit` to re-import. What breaks, and what a safe `gdt upgrade` must do (git cleanliness check, backup, dry run).
 3. **Godot trademark policy, full text.** Only excerpts were reviewed. Read the whole policy at <https://godot.foundation/policies-and-procedures/trademark-policy> and ask the Foundation in writing if anything about the name is unclear.
 4. **New Godot Asset Store API.** Is there a public, documented API for searching and downloading? The legacy Asset Library has a REST API.

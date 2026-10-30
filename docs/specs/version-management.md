@@ -1,6 +1,6 @@
 # Version management
 
-Status: Draft. Release asset names are assumptions to verify (see [open-questions.md](../open-questions.md)).
+Status: Draft. Release asset names verified against GitHub on 2026-10-29 for Godot 4.x (see Sources).
 
 ## Version identifiers
 
@@ -20,10 +20,33 @@ Stable is the default channel. Pre-releases must be named explicitly.
 
 All builds come from GitHub releases:
 
-- Stable: `godotengine/godot` releases.
-- Pre-releases: `godotengine/godot-builds` (to verify).
+- **Stable:** `godotengine/godot`, tag `<version>-stable` (for example `4.7.2-stable`).
+- **Pre-releases:** `godotengine/godot-builds`, tag `<version>-<channel>` (for example `4.8-beta2`, `4.8-dev7`). That repository also mirrors the stable releases, but `gdt` reads stable from the main repository.
 
-The asset for the current OS, architecture and flavor is chosen from the release's asset list; the published checksum file is downloaded and the archive is verified before extraction. A mismatch aborts with exit code 5 and installs nothing. Downloads go to a cache and are extracted into a temporary folder, then moved into place so a failed install never leaves a half-installed version.
+### Asset names (Godot 4.x)
+
+`V` is the tag (`4.7.2-stable`, `4.8-beta2`). Verified for 4.7.2-stable; pre-release names follow the same shape.
+
+| Platform | Standard | .NET (`mono`) |
+|---|---|---|
+| Windows x86_64 | `Godot_vV_win64.exe.zip` | `Godot_vV_mono_win64.zip` |
+| Windows arm64 | `Godot_vV_windows_arm64.exe.zip` | `Godot_vV_mono_windows_arm64.zip` |
+| Linux x86_64 | `Godot_vV_linux.x86_64.zip` | `Godot_vV_mono_linux_x86_64.zip` |
+| Linux arm64 | `Godot_vV_linux.arm64.zip` | `Godot_vV_mono_linux_arm64.zip` |
+| macOS (universal) | `Godot_vV_macos.universal.zip` | `Godot_vV_mono_macos.universal.zip` |
+
+Things the resolver must not assume:
+
+- The separators differ between flavors (`linux.x86_64` versus `mono_linux_x86_64`; `.exe.zip` versus `.zip`), so names are built from an explicit table per platform and flavor, not from a pattern.
+- Each release has many unrelated assets (Android, web, export templates, debug symbols, headless/server variants in 3.x). Only exact names from the table are accepted.
+- Godot 3.x uses different names (`x11_64`, `linux_headless`). Godot 3 is out of scope for now.
+- A pre-release may lack some platforms (a given beta did not list a macOS build in the check made); `gdt` reports "no build for your platform in this release" instead of failing obscurely.
+
+### Checksums
+
+Each release publishes one `SHA512-SUMS.txt` asset with lines of the form `<sha512 hex>  <asset name>` (two spaces). The file is downloaded from the same release and the archive's SHA-512 must match its line before extraction. A mismatch, or a missing line, aborts with exit code 5 and installs nothing. (The `.sha256` file on a release is only for the source tarball and is not used.) Downloads go to a cache and are extracted into a temporary folder, then moved into place so a failed install never leaves a half-installed version.
+
+Note: the checksum file is hosted next to the archive, so it protects against corrupt or tampered downloads but not against a compromised release. Signature verification is not offered by Godot at the time of writing.
 
 ## Storage
 
