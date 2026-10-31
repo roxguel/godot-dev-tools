@@ -196,6 +196,20 @@ impl ResponseCache {
     }
 }
 
+/// The releases in a cached page, or `None` if the entry cannot be trusted: its
+/// link to the next page must point at the GitHub API and its body must read.
+/// A cache file can be cut short by a crash or edited by hand.
+fn usable_page(source: Source, data: &CachedPage) -> Option<Vec<Release>> {
+    let next_ok = data
+        .next
+        .as_deref()
+        .is_none_or(|next| next.starts_with("https://api.github.com/"));
+    if !next_ok {
+        return None;
+    }
+    parse_page(source, &data.body).ok()
+}
+
 /// Fetches the releases of `source`, newest first as GitHub returns them.
 /// With `refresh`, the cache is bypassed for reading (and still updated).
 pub fn fetch_releases(
@@ -215,11 +229,20 @@ pub fn fetch_releases(
             source.repo()
         ));
 
-        let cached = cache.filter(|_| !refresh).and_then(|c| c.read(&current));
-        let data = match cached {
-            Some(data) => {
+        let cached = cache
+            .filter(|_| !refresh)
+            .and_then(|c| c.read(&current))
+            .and_then(|data| match usable_page(source, &data) {
+                Some(page) => Some((data, page)),
+                None => {
+                    log::debug!("ignoring a damaged cache entry for {current}");
+                    None
+                }
+            });
+        let (data, page) = match cached {
+            Some(found) => {
                 log::debug!("release list served from the cache: {current}");
-                data
+                found
             }
             None => {
                 let response = http.get(&current)?;
@@ -227,14 +250,16 @@ pub fn fetch_releases(
                     next: response.header("link").and_then(next_link),
                     body: response.body,
                 };
+                // Only a page that reads is worth keeping.
+                let page = parse_page(source, &data.body)?;
                 if let Some(cache) = cache {
                     let _ = cache.write(&current, &data);
                 }
-                data
+                (data, page)
             }
         };
 
-        releases.extend(parse_page(source, &data.body)?);
+        releases.extend(page);
         progress.advance(1);
         url = data.next;
     }
@@ -410,6 +435,40 @@ mod tests {
         fetch_releases(&third, Some(&cache), Source::Stable, true, &mut NoProgress).unwrap();
         assert_eq!(third.calls.borrow().len(), 1, "refresh bypasses the cache");
 
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_damaged_cache_entry_is_discarded_and_fetched_again() {
+        let dir = scratch("cache-damaged");
+        let cache = ResponseCache::new(dir.clone(), Duration::from_secs(600));
+        let url = Source::Stable.first_page_url();
+        for (next, body) in [
+            ("", "not json at all"),
+            ("", "[{\"tag_name\":"),
+            ("https://evil.example/next", PAGE),
+            ("", ""),
+        ] {
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(cache.path(&url), format!("{next}\n{body}")).unwrap();
+            let fake = Fake::new(vec![page(PAGE, None)]);
+            let releases =
+                fetch_releases(&fake, Some(&cache), Source::Stable, false, &mut NoProgress)
+                    .unwrap();
+            assert!(!releases.is_empty(), "{next:?} {body:?}");
+            assert_eq!(fake.calls.borrow().len(), 1, "{next:?} {body:?}");
+            // The bad entry was replaced by the good one.
+            let again = Fake::new(vec![]);
+            fetch_releases(&again, Some(&cache), Source::Stable, false, &mut NoProgress).unwrap();
+            assert_eq!(again.calls.borrow().len(), 0);
+        }
+        // A reply that does not read is not kept.
+        let _ = fs::remove_file(cache.path(&url));
+        let bad = Fake::new(vec![page("garbage", None)]);
+        assert!(
+            fetch_releases(&bad, Some(&cache), Source::Stable, false, &mut NoProgress).is_err()
+        );
+        assert!(cache.read(&url).is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

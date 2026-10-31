@@ -94,9 +94,14 @@ pub fn use_build(args: &UseArgs, ctx: &Ctx) -> Result<()> {
     let mut config = Config::load(&path)?;
 
     let Some(text) = &args.spec else {
-        match config.default_build() {
-            Some(build) => println!("{build}"),
-            None => ctx.info("No default engine is set. Choose one with `gdt use <version>`."),
+        let default = config.default_build();
+        if args.json {
+            println!("{}", json!({ "default": default.map(|b| b.to_string()) }));
+        } else if let Some(build) = default {
+            println!("{build}");
+        }
+        if default.is_none() {
+            ctx.info("No default engine is set. Choose one with `gdt use <version>`.");
         }
         return Ok(());
     };

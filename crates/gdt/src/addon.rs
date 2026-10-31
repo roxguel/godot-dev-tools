@@ -208,6 +208,7 @@ fn parse_source(text: &str) -> Result<(Kind, Option<String>)> {
     if text.starts_with("github:")
         || text.starts_with("https://github.com/")
         || text.starts_with("http://github.com/")
+        || text.starts_with("github.com/")
     {
         return Ok((Kind::Github(GithubSource::parse(text)?), None));
     }

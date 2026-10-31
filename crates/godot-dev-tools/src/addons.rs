@@ -100,6 +100,7 @@ impl GithubSource {
         let (path, mut git_ref) = if let Some(rest) = text
             .strip_prefix("https://github.com/")
             .or_else(|| text.strip_prefix("http://github.com/"))
+            .or_else(|| text.strip_prefix("github.com/"))
         {
             let mut parts = rest.trim_end_matches('/').split('/');
             let owner = parts.next().ok_or_else(bad)?;
@@ -604,6 +605,7 @@ mod tests {
         );
         assert_eq!(p("https://github.com/bitwes/Gut").slug(), "bitwes/Gut");
         assert_eq!(p("https://github.com/bitwes/Gut.git").repo, "Gut");
+        assert_eq!(p("github.com/bitwes/Gut@v9").git_ref.as_deref(), Some("v9"));
         assert_eq!(
             p("https://github.com/bitwes/Gut/tree/main")
                 .git_ref

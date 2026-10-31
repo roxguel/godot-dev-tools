@@ -5,6 +5,7 @@ use std::io;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use toml_edit::{DocumentMut, value};
 
 use crate::version::Build;
 
@@ -64,11 +65,19 @@ impl Config {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(write)?;
         }
-        let text = toml::to_string(self).map_err(|e| ConfigError::Invalid {
-            path: path.display().to_string(),
-            message: e.to_string(),
-        })?;
-        fs::write(path, text).map_err(write)
+        // Edit what is there instead of replacing it, so comments and keys that
+        // this version does not know (a newer gdt may have written them) survive.
+        let mut doc: DocumentMut = fs::read_to_string(path)
+            .ok()
+            .and_then(|text| text.parse().ok())
+            .unwrap_or_default();
+        match &self.default_engine {
+            Some(engine) => doc["default_engine"] = value(engine.as_str()),
+            None => {
+                doc.remove("default_engine");
+            }
+        }
+        fs::write(path, doc.to_string()).map_err(write)
     }
 
     /// The default build, when one is set and readable.
@@ -107,6 +116,35 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded, config);
         assert_eq!(loaded.default_build().unwrap().to_string(), "4.7.2-mono");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn saving_keeps_comments_and_unknown_keys() {
+        let dir = scratch("cfg-keep");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(
+            &path,
+            "# my settings
+default_engine = \"4.6\"
+future_key = 7 # from a newer gdt
+",
+        )
+        .unwrap();
+        let mut config = Config::load(&path).unwrap();
+        config.default_engine = Some("4.7.2".into());
+        config.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# my settings"), "{text}");
+        assert!(text.contains("future_key = 7 # from a newer gdt"), "{text}");
+        assert!(text.contains("default_engine = \"4.7.2\""), "{text}");
+
+        config.default_engine = None;
+        config.save(&path).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("default_engine"), "{text}");
+        assert!(text.contains("future_key"), "{text}");
         let _ = fs::remove_dir_all(dir);
     }
 

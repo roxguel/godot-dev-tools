@@ -16,6 +16,10 @@ pub enum HttpError {
     Network { url: String, message: String },
     #[error("{url} answered with HTTP {status}")]
     Status { url: String, status: u16 },
+    #[error(
+        "GitHub did not accept the credentials for {url} (HTTP 401). If GITHUB_TOKEN or GH_TOKEN is set, check that the token is valid and has not expired, or unset it to use the API without one"
+    )]
+    Unauthorized { url: String },
     #[error("{}", rate_limit_message(*reset_at, now_secs()))]
     RateLimited {
         /// Unix time at which the limit resets, when GitHub said so.
@@ -71,6 +75,11 @@ pub fn check_status(url: &str, status: u16, headers: &[(String, String)]) -> Res
     if status == 429 || (status == 403 && exhausted) {
         return Err(HttpError::RateLimited {
             reset_at: header_value(headers, "x-ratelimit-reset").and_then(|v| v.parse().ok()),
+        });
+    }
+    if status == 401 && url.starts_with(GITHUB_API) {
+        return Err(HttpError::Unauthorized {
+            url: url.to_string(),
         });
     }
     Err(HttpError::Status {
@@ -249,6 +258,19 @@ mod tests {
                 status: 404
             })
         );
+    }
+
+    #[test]
+    fn a_rejected_github_token_says_so() {
+        let url = "https://api.github.com/repos/o/r/releases";
+        let error = check_status(url, 401, &[]).unwrap_err();
+        assert_eq!(error, HttpError::Unauthorized { url: url.into() });
+        assert!(error.to_string().contains("GITHUB_TOKEN"));
+        // Other hosts keep the plain status.
+        assert!(matches!(
+            check_status("https://example.com/x", 401, &[]),
+            Err(HttpError::Status { status: 401, .. })
+        ));
     }
 
     #[test]
