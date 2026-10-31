@@ -1,6 +1,6 @@
 # Version management
 
-Status: Draft. Release asset names verified against GitHub on 2026-10-29 for Godot 4.x (see Sources).
+Status: Implemented, except the parts marked *(planned)*. Release asset names verified against GitHub on 2026-10-29 for Godot 4.x (see Sources).
 
 ## Version identifiers
 
@@ -78,7 +78,7 @@ Which build to use for a command, first match wins (ADR 0005):
 4. The project's `project.godot`: `config/features` holds `"MAJOR.MINOR"` and `"C#"` for .NET projects. This resolves to the newest installed matching stable build (and flavor).
 5. The global default (`gdt use`).
 
-If the result is not installed: `gdt run` / `gdt open` / the shim print the exact `gdt install ...` command and exit with code 4. An opt-in setting (`auto_install = true`) installs it on the spot.
+If the result is not installed: `gdt run` / `gdt open` / the shim print the exact `gdt install ...` command and exit with code 4. An opt-in setting (`auto_install = true`) that installs it on the spot is *(planned)*.
 
 ### Finding the project
 
@@ -98,14 +98,14 @@ There is a single `version` field; the flavor is the `-mono` suffix. The project
 - On Windows a build has two executables: `Godot_v..._win64.exe` (the editor, a GUI program) and `Godot_v..._win64_console.exe` (keeps a terminal attached). Output only reaches a terminal from the console one, so `gdt run` and the shim use the console executable and `gdt open` uses the editor one. Verified on 4.7.2, whose zip holds just these two files at the root; the Linux, macOS and .NET layouts are still to verify.
 - `gdt open <path>`: resolve for the project, start the editor (`--editor --path <project>`), detach from the terminal, return immediately. Outside a project, or with `--manager`, it starts Godot's project manager with the global default build.
 - `gdt run -- <args>`: resolve, run in the foreground in the current directory, forward stdin/stdout/stderr and the exit code. `gdt run script.gd` is the shortcut for `--headless -s script.gd` (the script must extend `SceneTree` or `MainLoop`).
-- `gdt engine info`: the executable, the version, the flavor, the editor settings folder (per user, shared by builds of the same major version, to verify), the project's `.godot/` folder, and whether the build is self-contained (a `_sc_` file next to the executable makes Godot keep its data beside it; to verify).
+- `gdt engine info` *(planned)*: the executable, the version, the flavor, the editor settings folder (per user, shared by builds of the same major version, to verify), the project's `.godot/` folder, and whether the build is self-contained (a `_sc_` file next to the executable makes Godot keep its data beside it; to verify).
 
 ## The shim
 
 Two ways to invoke Godot (ADR 0006):
 
 1. **Explicit:** `gdt run -- ...`. No setup beyond `gdt` itself.
-2. **Shim:** `gdt shim install` puts a `godot` in `<data>/bin` and says what to add to `PATH` (it never edits `PATH`, shell profiles or the registry). The shim is `gdt` itself started under the name `godot` (ADR 0009): a symbolic link on Unix, a copy on Windows.
+2. **Shim:** `gdt shim install` puts a `godot` in `<data>/bin` and says what to add to `PATH` (it edits `PATH` only with `--modify-path`, see below). The shim is `gdt` itself started under the name `godot` (ADR 0009): a symbolic link on Unix, a copy on Windows.
 
 In shim mode:
 

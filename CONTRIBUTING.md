@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. The project is in its early design phase, so the most useful contributions right now are feedback on the documents in [`docs/`](docs/README.md) and answers to the items in [`docs/open-questions.md`](docs/open-questions.md).
+Thanks for your interest. The project is pre-release: the core works, and the most useful contributions right now are bug reports, testing on Linux and macOS, feedback on the documents in [`docs/`](docs/README.md) and answers to the items in [`docs/open-questions.md`](docs/open-questions.md).
 
 ## Workflow
 
@@ -13,11 +13,11 @@ Thanks for your interest. The project is in its early design phase, so the most 
 
 ```bash
 cargo fmt --all
-cargo clippy --workspace --all-targets
-cargo test --workspace
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 ```
 
-Code must compile and pass tests on Windows, Linux and macOS; CI checks all three. Keep OS-specific code in a platform module, and keep filesystem and network access behind traits so logic can be tested without them.
+Code must compile and pass tests on Windows, Linux and macOS; CI checks all three. Keep OS-specific code in a platform module, and keep filesystem and network access behind traits so logic can be tested without them. A name or path that comes from outside (the command line, `gdt.toml`, `gdt.lock`, an archive) must go through `crates/godot-dev-tools/src/names.rs` before it is used to build a path, and a change that touches such code needs a regression test with a hostile input.
 
 ## Licensing
 

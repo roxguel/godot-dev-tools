@@ -1,6 +1,6 @@
 # Documentation
 
-Every document declares its status at the top: `Draft`, `Accepted`, `Implemented`, `Superseded`.
+Every document declares its status at the top: `Draft`, `Accepted`, `Implemented`, `Superseded`. Where a spec is only partly implemented it says so and marks the missing parts *(planned)*.
 
 | Document | What it covers |
 |---|---|

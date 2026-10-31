@@ -1,13 +1,13 @@
 # CLI surface
 
-Status: Draft. The command structure is decided in [ADR 0007](../adr/0007-command-structure.md); `list`, `list --remote`, `inspect` and `paths` exist today.
+Status: Implemented, except the commands marked *(planned)*. The command structure is decided in [ADR 0007](../adr/0007-command-structure.md). `gdt --help` shows what exists in the build you have.
 
 One binary, `gdt` (ADR 0003). Commands are grouped by area, like `dotnet tool install` or `gh auth login`:
 
 - `engine` for Godot builds, with **shortcuts** at the top level for the commands people use all the time.
 - `addon` for addons. Always spelled out, never a shortcut.
 - Project actions at the top level (`run`, `open`, `test`, `sync`, `inspect`, `init`).
-- `auth`, `shim`, `config`, `cache` and a few utilities.
+- `shim` and `paths` today; `auth`, `config`, `cache` and a few utilities are planned.
 
 Running `gdt` with no arguments prints the help and exits with 0. It never launches anything.
 
@@ -21,7 +21,7 @@ A top-level word that belongs to another group fails with a hint: `gdt add 4.0` 
 
 A command-line option gets a one-letter form when it is used often and harmless: `-a` `--all`, `-r` `--remote`, `-c` `--channel`, `-m` `--mono`, `-j` `--json`, `-e` `--editor`, `-o` `--open`, `-g` `--godot`, `-q` `--quiet`, `-v` `--verbose`. The same letter always means the same thing, and the global letters (`q`, `v`, `g`, plus `-h` and `-V`) are never reused. Options that are rare, that change or delete things, or that are easy to type by accident stay long-only (`--refresh`, `--manager`, `--locked`, `--no-dev`, `--revoke`, `--with-token`, `--modify-path`). `-f` is kept for a future `--force`, and `-D` for `--dev`.
 
-`-v` prints diagnostics on stderr, prefixed `[debug]`: what is being resolved, URLs requested and their HTTP status, cache hits, the asset chosen, checksums, folders used. `-vv` adds what the underlying libraries log (HTTP and TLS). Progress switches to plain lines while `-v` is on, so the diagnostics stay readable. Tokens and other secrets are never logged. The library reports diagnostics through the `log` crate and the CLI decides whether to show them.
+`-v` prints diagnostics on stderr, prefixed `[debug]`: what is being resolved, URLs requested and their HTTP status, cache hits, the asset chosen, checksums, folders used. `-vv` adds what the underlying libraries log (HTTP and TLS) up to debug level, never their trace output. Progress switches to plain lines while `-v` is on, so the diagnostics stay readable. Tokens and other secrets are never logged, and anything that looks like one (an `Authorization` header, a GitHub token, the value of `GH_TOKEN`/`GITHUB_TOKEN`) is replaced by `***` before a line is printed. The library reports diagnostics through the `log` crate and the CLI decides whether to show them.
 
 ## Output and progress
 
@@ -41,8 +41,8 @@ Progress comes in three styles, chosen with `--progress <auto|rich|plain|none>` 
 
 - GitHub API requests send `User-Agent: gdt/<version>`.
 - An optional `GITHUB_TOKEN` (or `GH_TOKEN`) raises the API rate limit. It is only ever sent to `api.github.com`, never to other hosts, and never printed.
-- Release lists are cached under the cache directory for 10 minutes; `--refresh` skips the cache.
-- When the rate limit is hit, `gdt` says so, when it resets, and suggests setting a token; exit code 3.
+- Release lists are cached under the cache directory for 10 minutes; `--refresh` skips the cache. A cache file that cannot be read is ignored and fetched again.
+- When the rate limit is hit, `gdt` says so, when it resets, and suggests setting a token; exit code 3. A token that GitHub rejects (HTTP 401) is reported as such, with the hint to check or unset `GITHUB_TOKEN`/`GH_TOKEN`.
 - Credentials for other services are described in [authentication.md](authentication.md).
 
 ## Exit codes
@@ -55,7 +55,7 @@ Progress comes in three styles, chosen with `--progress <auto|rich|plain|none>` 
 | 3 | Network or download failure |
 | 4 | Version not found or not installed |
 | 5 | Checksum verification failed |
-| 6 | Authentication required or rejected |
+| 6 | A paid asset: `gdt` does not buy. Authentication for the Store is planned |
 | 10 | Tests failed (`gdt test`) |
 | other | `gdt run` and the shim forward Godot's own exit code unchanged |
 
@@ -74,8 +74,8 @@ A *version spec* is `latest`, `beta`, `rc`, `dev`, `pre`, `4`, `4.7`, `4.7.2`, `
 | `use [spec]` (**shortcut**) | `gdt use 4.7.2`, `gdt use` | Choose the default among the **installed** builds (`gdt use latest` is the newest installed). Stores the concrete version, never an alias. Without a spec, shows the current default. It changes what `gdt run` and `gdt open` use outside a project; to make a plain `godot` command follow it, install the shim (`gdt shim install`) |
 | `pin <spec>` (**shortcut**) | `gdt pin latest` | Write the build this project uses into `gdt.toml` (`[godot] version`). Looks the spec up on GitHub when it is not exact, and stores the concrete version. Says if that build is not installed yet |
 | `which [path]` (**shortcut**) | `gdt which`, `gdt which --editor` | Print the executable that would run here, for scripts. On Windows it is the console one unless `--editor` is given |
-| `info [spec]` | `gdt engine info` | Executable, version, flavor, the editor settings folder, the project data folder and whether the build is self-contained |
-| `upgrade [spec]` | `gdt upgrade 4.8` | Move a project to another engine version using Godot's own tools (to be researched, milestone M6) |
+| `info [spec]` *(planned)* | `gdt engine info` | Executable, version, flavor, the editor settings folder, the project data folder and whether the build is self-contained |
+| `upgrade [spec]` *(planned)* | `gdt upgrade 4.8` | Move a project to another engine version using Godot's own tools (to be researched, milestone M6) |
 
 Channel aliases resolve to the newest published build of that channel: `latest` is the newest stable, `beta`, `rc` and `dev` the newest of each pre-release channel, `pre` the newest pre-release of any channel.
 
@@ -86,7 +86,7 @@ Channel aliases resolve to the newest published build of that channel: `latest` 
 | `run [script.gd] [args]` | `gdt run tools/x.gd one two`, `gdt run -- --path . -s tools/x.gd` | Run Godot with the resolved version from any folder, with its output and exit code passed through (like `node index.js`). A first argument ending in `.gd` is a script: it runs as `godot --headless -s <file> -- <args>`, and the script reads its arguments with `OS.get_cmdline_user_args()`. Anything else is given to Godot untouched, so `gdt run -- --path <dir> ...` works from any folder: `--path` also decides which project's version is used. On Windows it runs the `_console.exe` build, the only one that prints to a terminal. Checked with 4.7.2: output, script arguments and exit code 3 from `quit(3)` |
 | `open [path]` | `gdt open`, `gdt open C:\games\cozy`, `gdt open --manager` | Open the editor on a project. Outside a project, or with `--manager`, opens Godot's project manager with the default build. It returns at once and the editor keeps running when the terminal closes (detached on Windows; elsewhere it follows the terminal's own rules). A path that is not inside a project is an error |
 | `inspect [path]` | `gdt inspect` | Show which engine a project asks for (exists) |
-| `init` | `gdt init` | Create a `gdt.toml` from the engine the project already uses |
+| `init` *(planned)* | `gdt init` | Create a `gdt.toml` from the engine the project already uses |
 | `sync [--no-dev]` | `gdt sync`, `gdt sync --no-dev` | Make a fresh clone ready: install the engine and the addons from the project files (like `npm ci`). With `--no-dev`, skip the development addons |
 | `test [paths]` | `gdt test`, `gdt test test/unit`, `gdt test test/test_x.gd --report junit.xml` | Run the project's tests headless with the right Godot: GUT, gdUnit4 or a script of your own, found from the installed addons or `[test]` in `gdt.toml`. Imports a fresh clone first, and judges the result from the JUnit report rather than the exit code alone. Exits 0 when all pass, 10 when any fails. See [testing.md](testing.md) |
 
@@ -107,12 +107,12 @@ See [addons.md](addons.md). Always under `gdt addon`.
 
 | Command | Example | What it does |
 |---|---|---|
-| `auth login store` | `gdt auth login store`, `gdt auth login store --with-token < token.txt` | Save an Asset Store API token. See [authentication.md](authentication.md) |
-| `auth status` / `auth logout store` | `gdt auth status` | Show which services are signed in; forget a token (and revoke it when asked) |
+| `auth login store` *(planned)* | `gdt auth login store`, `gdt auth login store --with-token < token.txt` | Save an Asset Store API token. See [authentication.md](authentication.md) |
+| `auth status` / `auth logout store` *(planned)* | `gdt auth status` | Show which services are signed in; forget a token (and revoke it when asked) |
 | `shim install` / `uninstall` / `status` | `gdt shim install`, `gdt shim install --modify-path`, `gdt shim status` | Put the `godot` shim in gdt's bin folder (idempotent; refreshes an old copy), remove it, or show where it stands: installed and up to date, on `PATH` or not, and which `godot` would run. `gdt` changes `PATH` only with `--modify-path` (on `install`, and undone with `uninstall --modify-path`); see [version-management.md](version-management.md) and ADR 0009 |
-| `config get\|set\|list` | `gdt config set auto_install true` | Read or change user settings |
-| `cache clean` | `gdt cache clean` | Delete downloaded archives and cached release lists |
+| `config get\|set\|list` *(planned)* | `gdt config set auto_install true` | Read or change user settings |
+| `cache clean` *(planned)* | `gdt cache clean` | Delete downloaded archives and cached release lists |
 | `paths [--open <what>]` | `gdt paths`, `gdt paths --open data`, `gdt paths --open config-file` | Where `gdt` keeps its files; with `--open`, show one in the file manager. `<what>` is `data`, `config`, `config-file` (selected in its folder), `versions`, `cache` or `bin`. A file that does not exist yet opens its folder; a missing folder is an error (exists) |
-| `doctor` | `gdt doctor` | Check the environment: `PATH`, shim, .NET, permissions |
-| `self-update` | `gdt self-update` | Update `gdt` |
-| `completions <shell>` | `gdt completions powershell` | Generate shell completions |
+| `doctor` *(planned)* | `gdt doctor` | Check the environment: `PATH`, shim, .NET, permissions |
+| `self-update` *(planned)* | `gdt self-update` | Update `gdt` |
+| `completions <shell>` *(planned)* | `gdt completions powershell` | Generate shell completions |
