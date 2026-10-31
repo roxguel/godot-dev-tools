@@ -180,18 +180,20 @@ pub mod windows {
     /// change; deleting one that does not exist writes nothing else. Terminals
     /// that are already open keep their old environment until they are restarted.
     pub fn notify_environment_changed() -> bool {
-        Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Environment]::SetEnvironmentVariable('GDT_NOTIFY_ENV_CHANGE', $null, 'User')",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+        Command::new(crate::system::windows_program(
+            r"System32\WindowsPowerShell\v1.0\powershell.exe",
+        ))
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Environment]::SetEnvironmentVariable('GDT_NOTIFY_ENV_CHANGE', $null, 'User')",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
     }
 }
 

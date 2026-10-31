@@ -6,6 +6,7 @@ mod progress;
 mod run;
 mod select;
 mod shim;
+mod system;
 mod test;
 mod verbose;
 

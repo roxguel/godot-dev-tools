@@ -9,8 +9,8 @@ use godot_dev_tools::{
     Dirs, Platform, find_console_executable, find_executable, find_project_root, godot_path_arg,
 };
 
+use crate::Ctx;
 use crate::select::resolve_for;
-use crate::{Ctx, ExitWith};
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -64,20 +64,32 @@ pub fn run(args: &RunArgs, ctx: &Ctx) -> Result<()> {
         .with_context(|| format!("no Godot executable found in {}", dir.display()))?;
     log::debug!("running {} {godot:?}", executable.display());
 
+    start_godot(&executable, &godot)
+}
+
+#[cfg(unix)]
+fn start_godot(executable: &Path, args: &[String]) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    // Replaces this process: the terminal, the signals (a `kill` sent to gdt
+    // reaches Godot) and the exit code are Godot's own.
+    let error = Command::new(executable).args(args).exec();
+    Err(error).with_context(|| format!("could not start {}", executable.display()))
+}
+
+#[cfg(not(unix))]
+fn start_godot(executable: &Path, args: &[String]) -> Result<()> {
     // Ctrl+C reaches Godot too, since it shares the terminal; gdt waits for it
     // and returns its exit code instead of dying first.
     let _ = ctrlc::set_handler(|| {});
-    let status = Command::new(&executable)
-        .args(&godot)
+    let status = Command::new(executable)
+        .args(args)
         .status()
         .with_context(|| format!("could not start {}", executable.display()))?;
-    match status.code() {
-        Some(0) => Ok(()),
+    match crate::system::exit_code(status) {
+        0 => Ok(()),
         // The code as it is, not squeezed into a byte: a Windows crash code
         // such as 0xC0000005 must reach the caller unchanged.
-        Some(code) => Err(ExitWith(code).into()),
-        // Ended by a signal.
-        None => Err(ExitWith(1).into()),
+        code => Err(crate::ExitWith(code).into()),
     }
 }
 

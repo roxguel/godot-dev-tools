@@ -74,6 +74,8 @@ pub struct EngineFeatures {
     pub engine: Option<(u32, u32)>,
     /// Whether the project is a C# (.NET) project.
     pub dotnet: bool,
+    /// `config_version`: 5 for Godot 4, 4 for Godot 3 and lower for older ones.
+    pub config_version: Option<u32>,
 }
 
 impl EngineFeatures {
@@ -88,7 +90,14 @@ impl EngineFeatures {
 
     /// Parses the contents of a `project.godot`.
     pub fn parse(text: &str) -> Self {
-        let mut features = Self::default();
+        let mut features = Self {
+            config_version: text
+                .lines()
+                .map(str::trim)
+                .find_map(|l| l.strip_prefix("config_version="))
+                .and_then(|v| v.trim().parse().ok()),
+            ..Self::default()
+        };
         let Some(line) = text
             .lines()
             .map(str::trim)
@@ -136,6 +145,18 @@ mod tests {
         let f = EngineFeatures::parse(text);
         assert_eq!(f.engine, Some((4, 3)));
         assert!(f.dotnet);
+    }
+
+    #[test]
+    fn the_config_version_tells_godot_3_from_4() {
+        let v = |text: &str| EngineFeatures::parse(text).config_version;
+        assert_eq!(v("config_version=4\n\n[application]\n"), Some(4));
+        assert_eq!(
+            v("; Engine configuration file.\nconfig_version=5\n"),
+            Some(5)
+        );
+        assert_eq!(v("[application]\nconfig/name=\"x\"\n"), None);
+        assert_eq!(v("config_version=oops\n"), None);
     }
 
     #[test]
