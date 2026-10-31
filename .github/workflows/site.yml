@@ -1,0 +1,101 @@
+name: Site
+
+# Builds the documentation site (site/) and publishes it to GitHub Pages at
+# https://gdt.roxguel.dev.
+#
+# - Pull requests (forks included) only run the check build: no secrets, no deploy.
+# - The deploy job runs only for a push to main (that is, after the maintainer's
+#   merge) or a manual run on main, and is the only one with write permissions.
+# - The site is built from site/ plus the documents it reuses (docs/ and the root
+#   documents; see site/scripts/sync-docs.mjs), so a change to any of them rebuilds it.
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "site/**"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "SECURITY.md"
+      - "CONTRIBUTING.md"
+      - ".github/workflows/site.yml"
+  pull_request:
+    paths: *paths
+  workflow_dispatch:
+
+# Read-only by default; the deploy job asks for more.
+permissions:
+  contents: read
+
+# Third-party actions are pinned to a full commit SHA (the tag is in the comment);
+# Dependabot keeps them up to date.
+jobs:
+  build:
+    name: Site build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The pnpm version is the one in site/package.json ("packageManager").
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: site/package.json
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: site/.nvmrc
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - name: Install the dependencies from the lockfile
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: site
+        run: pnpm build
+
+      - name: Package for GitHub Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  audit:
+    name: Site dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: site/.nvmrc
+      - name: Audit
+        working-directory: site
+        run: pnpm audit --audit-level=moderate
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # One deploy at a time, and never cancel one that is running. Only this job is in the
+    # group, so pull request builds can not displace a pending deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write # publish the site
+      id-token: write # prove to Pages that the deploy comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
