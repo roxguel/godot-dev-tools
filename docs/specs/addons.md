@@ -62,7 +62,7 @@ Unlike `node_modules`, `addons/` is part of how Godot opens a project, so there 
 | `track` | Nothing is ignored; every addon folder is committed | The project must open without `gdt` or without a network. The lockfile still records and verifies hashes |
 | `ignore` | The whole `addons/` folder is ignored; everything must come from `gdt` | Projects whose addons are all declared in `gdt.toml`. `gdt` warns when `addons/` holds a folder it does not manage, because that folder would not be in Git |
 
-In `managed` and `ignore`, `gdt sync` or `gdt addon install` restores the addons: a fresh clone needs the network and that command before the editor opens cleanly. `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given.
+In `managed` and `ignore`, `gdt sync` or `gdt addon install` restores the addons: a fresh clone needs the network and that command before the editor opens cleanly. `gdt` refuses to overwrite a managed addon that has local changes (its hash no longer matches) unless `--force` is given. `gdt addon update` follows the same rule, also for a declared addon that has no lock entry yet but whose folder already exists: there is nothing to compare it with, so it is replaced only with `--force`.
 
 ## Development addons
 
