@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::engine::{EngineError, extract_zip};
 use crate::http::{HttpClient, HttpError};
 use crate::lock::{LockedAddon, hash_dir};
+use crate::names::{addon_name_problem, normalize_subdir};
 use crate::progress::Progress;
 use crate::storage::Dirs;
 
@@ -40,8 +41,8 @@ pub enum AddonError {
         price: String,
         url: String,
     },
-    #[error("`{0}` is not a usable addon name")]
-    BadName(String),
+    #[error("`{name}` is not a usable addon name: {why}")]
+    BadName { name: String, why: &'static str },
     #[error(
         "addons/{name} has files that gdt did not install or that were changed; use --force to overwrite or remove it anyway"
     )]
@@ -325,8 +326,15 @@ fn find_subdir(root: &Path) -> Result<String, AddonError> {
     ))
 }
 
-fn valid_name(name: &str) -> bool {
-    !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', ':']) && name != ".."
+/// Checks that `name` can be the folder `addons/<name>` (see [`addon_name_problem`]).
+pub fn validate_name(name: &str) -> Result<(), AddonError> {
+    match addon_name_problem(name) {
+        None => Ok(()),
+        Some(why) => Err(AddonError::BadName {
+            name: name.to_string(),
+            why,
+        }),
+    }
 }
 
 /// Downloads the commit and installs the addon into `<project>/addons/<name>`.
@@ -390,7 +398,9 @@ fn place(
     let root = single_root(staging);
 
     let subdir = match job.subdir {
-        Some(given) => given.trim_matches('/').replace('\\', "/"),
+        Some(given) => normalize_subdir(given).map_err(|why| {
+            AddonError::BadSource(format!("the folder `{given}` cannot be used: {why}"))
+        })?,
         None => find_subdir(&root)?,
     };
     let source_dir = if subdir == "." {
@@ -401,15 +411,21 @@ fn place(
     if !source_dir.is_dir() {
         return Err(AddonError::SubdirMissing(subdir));
     }
+    // Whatever the path said, what is moved must live inside the unpacked archive.
+    let inside = match (source_dir.canonicalize(), root.canonicalize()) {
+        (Ok(source), Ok(root)) => source.starts_with(root),
+        _ => false,
+    };
+    if !inside {
+        return Err(AddonError::SubdirMissing(subdir));
+    }
 
     let name = match job.name {
         Some(name) => name.to_string(),
         None if subdir == "." => job.default_name.to_string(),
         None => subdir.rsplit('/').next().unwrap_or(&subdir).to_string(),
     };
-    if !valid_name(&name) {
-        return Err(AddonError::BadName(name));
-    }
+    validate_name(&name)?;
 
     let target = addons_dir.join(&name);
     if target.exists() {
@@ -421,6 +437,18 @@ fn place(
     fs::rename(&source_dir, &target).map_err(io_err(format!("could not install addons/{name}")))?;
     let hash = hash_dir(&target).map_err(io_err(format!("could not read addons/{name}")))?;
     Ok(Fetched { name, subdir, hash })
+}
+
+/// `<project>/addons/<name>`, refusing a name that is not one plain folder name,
+/// so that nothing outside `addons/` can be read or deleted through it.
+fn addon_dir(project_dir: &Path, name: &str) -> io::Result<PathBuf> {
+    match addon_name_problem(name) {
+        None => Ok(project_dir.join("addons").join(name)),
+        Some(why) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("`{name}` is not a usable addon name: {why}"),
+        )),
+    }
 }
 
 /// How an installed addon compares with the lockfile.
@@ -436,7 +464,7 @@ pub enum AddonStatus {
 
 /// Compares `<project>/addons/<name>` with its lockfile entry.
 pub fn addon_status(project_dir: &Path, locked: &LockedAddon) -> io::Result<AddonStatus> {
-    let dir = project_dir.join("addons").join(&locked.name);
+    let dir = addon_dir(project_dir, &locked.name)?;
     if !dir.is_dir() {
         return Ok(AddonStatus::Missing);
     }
@@ -449,7 +477,7 @@ pub fn addon_status(project_dir: &Path, locked: &LockedAddon) -> io::Result<Addo
 
 /// Deletes `<project>/addons/<name>`; nothing happens if it is not there.
 pub fn remove_addon_dir(project_dir: &Path, name: &str) -> io::Result<()> {
-    let dir = project_dir.join("addons").join(name);
+    let dir = addon_dir(project_dir, name)?;
     match fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -782,10 +810,63 @@ mod tests {
 
     #[test]
     fn unsafe_names_are_refused() {
-        for bad in ["", ".hidden", "a/b", "..", "a\\b"] {
-            assert!(!valid_name(bad), "{bad:?}");
+        for bad in ["", ".hidden", "a/b", "..", "a\\b", "con", "x."] {
+            assert!(
+                matches!(validate_name(bad), Err(AddonError::BadName { .. })),
+                "{bad:?}"
+            );
         }
-        assert!(valid_name("gut") && valid_name("Godot-Jolt") && valid_name("a.b"));
+        for ok in ["gut", "Godot-Jolt", "a.b"] {
+            assert!(validate_name(ok).is_ok(), "{ok:?}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_escapes_addons_never_touches_the_disk() {
+        let root = scratch("addon-escape");
+        let project = root.join("project");
+        fs::create_dir_all(project.join("addons/gut")).unwrap();
+        fs::write(project.join("keep.txt"), "mine").unwrap();
+        for bad in ["..", "../..", "../x", "a/b", "C:\\x"] {
+            let error = remove_addon_dir(&project, bad).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidInput, "{bad:?}");
+            let locked = LockedAddon {
+                name: bad.into(),
+                source: "github:o/r".into(),
+                rev: SHA.into(),
+                subdir: ".".into(),
+                hash: "sha256:0".into(),
+            };
+            assert!(addon_status(&project, &locked).is_err(), "{bad:?}");
+        }
+        assert!(project.join("keep.txt").is_file(), "the project is intact");
+        assert!(project.join("addons/gut").is_dir());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_folder_outside_the_archive_is_never_moved() {
+        let root = scratch("addon-subdir");
+        let project = root.join("project");
+        let outside = root.join("precious");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("data.txt"), "mine").unwrap();
+        let fake = Fake::new(&[("o-r-abc/addons/gut/plugin.cfg", "x")]);
+        let src = source();
+        let absolute = outside.to_string_lossy().to_string();
+        for bad in [absolute.as_str(), "..", "../..", "addons/../..", "/etc"] {
+            let result = install_github(
+                &fake,
+                &dirs(&root),
+                &project,
+                &plan(&src, Some(bad), Some("x"), false),
+                &mut NoProgress,
+            );
+            assert!(result.is_err(), "{bad:?} was accepted");
+            assert!(outside.join("data.txt").is_file(), "{bad:?} moved a folder");
+            assert!(!project.join("addons/x").exists(), "{bad:?} installed");
+        }
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

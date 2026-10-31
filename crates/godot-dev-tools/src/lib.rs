@@ -10,6 +10,7 @@ pub mod engine;
 pub mod http;
 pub mod lock;
 pub mod manifest;
+pub mod names;
 pub mod progress;
 pub mod project;
 pub mod releases;

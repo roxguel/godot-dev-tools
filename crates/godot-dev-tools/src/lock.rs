@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::manifest::GitMode;
+use crate::names::{addon_name_problem, normalize_subdir};
 
 /// The name of the lockfile.
 pub const LOCK_FILE: &str = "gdt.lock";
@@ -80,10 +81,28 @@ impl LockFile {
                 });
             }
         };
-        toml::from_str(&text).map_err(|e| LockError::Invalid {
+        let invalid = |message: String| LockError::Invalid {
             path: path.display().to_string(),
-            message: e.to_string(),
-        })
+            message,
+        };
+        let lock: Self = toml::from_str(&text).map_err(|e| invalid(e.to_string()))?;
+        // The names become folders that gdt deletes and the subfolders are moved
+        // out of archives, so a hand-edited file must not be able to point elsewhere.
+        for addon in &lock.addons {
+            if let Some(why) = addon_name_problem(&addon.name) {
+                return Err(invalid(format!(
+                    "the addon name `{}` cannot be used: {why}",
+                    addon.name
+                )));
+            }
+            if let Err(why) = normalize_subdir(&addon.subdir) {
+                return Err(invalid(format!(
+                    "the folder `{}` of {} cannot be used: {why}",
+                    addon.subdir, addon.name
+                )));
+            }
+        }
+        Ok(lock)
     }
 
     /// Writes the file, with the addons sorted by name so diffs stay small.
@@ -367,5 +386,43 @@ mod tests {
         let added = set_ignore_block("a", &lines);
         assert!(added.starts_with("a\n\n# >>>"));
         assert_eq!(set_ignore_block(&added, &[]), "a\n");
+    }
+
+    #[test]
+    fn names_and_subdirs_that_escape_are_refused() {
+        let dir = std::env::temp_dir().join(format!("gdt-test-{}-lock-escape", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(LOCK_FILE);
+        let entry = |name: &str, subdir: &str| {
+            format!(
+                "version = 1
+[[addon]]
+name = \"{name}\"
+source = \"github:o/r\"
+rev = \"abc\"
+subdir = \"{subdir}\"
+hash = \"sha256:0\"
+"
+            )
+        };
+        for (name, subdir) in [
+            ("..", "."),
+            ("../..", "."),
+            ("a/b", "."),
+            ("con", "."),
+            ("gut", ".."),
+            ("gut", "/etc"),
+        ] {
+            fs::write(&path, entry(name, subdir)).unwrap();
+            let err = LockFile::load(&path).unwrap_err();
+            assert!(
+                matches!(err, LockError::Invalid { .. }),
+                "{name:?} {subdir:?}"
+            );
+        }
+        fs::write(&path, entry("gut", "addons/gut")).unwrap();
+        assert_eq!(LockFile::load(&path).unwrap().addons.len(), 1);
+        let _ = fs::remove_dir_all(dir);
     }
 }
