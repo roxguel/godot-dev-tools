@@ -51,12 +51,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check install.sh with ShellCheck
-        run: shellcheck scripts/install.sh
+        run: shellcheck site/public/install.sh
       - name: Check that install.ps1 parses
         shell: pwsh
         run: |
           $errors = $null
-          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/scripts/install.ps1", [ref]$null, [ref]$errors)
+          $null = [System.Management.Automation.Language.Parser]::ParseFile("$PWD/site/public/install.ps1", [ref]$null, [ref]$errors)
           if ($errors) { $errors | ForEach-Object { Write-Error "$($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
 
   deny:

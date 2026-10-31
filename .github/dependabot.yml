@@ -12,3 +12,14 @@ updates:
       interval: weekly
     commit-message:
       prefix: "chore(ci)"
+  # The documentation site. The npm ecosystem also reads pnpm-lock.yaml. The cooldown
+  # matches minimumReleaseAge in site/pnpm-workspace.yaml: a version younger than that
+  # would be refused by the install, so Dependabot does not propose it.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: "chore(site)"

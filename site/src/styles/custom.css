@@ -1,0 +1,17 @@
+/* A teal accent of our own; the Godot colors and logo are not used. */
+:root {
+  --sl-color-accent-low: #0b3b39;
+  --sl-color-accent: #0f8f8a;
+  --sl-color-accent-high: #8fe0da;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #c4efeb;
+  --sl-color-accent: #0a7570;
+  --sl-color-accent-high: #064a47;
+}
+.not-affiliated {
+  margin-top: 1rem;
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+  max-width: 60ch;
+}

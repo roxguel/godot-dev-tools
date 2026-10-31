@@ -94,7 +94,7 @@ paths = ["test"]
 
 ## Documentation
 
-The design lives in [`docs/`](docs/README.md): the vision, the roadmap, the specs of each area and the architecture decision records.
+The documentation site is at <https://gdt.roxguel.dev> (its source is in [`site/`](site/README.md)). The design lives in [`docs/`](docs/README.md): the vision, the roadmap, the specs of each area and the architecture decision records; the site publishes them.
 
 ## AI-assisted development
 
