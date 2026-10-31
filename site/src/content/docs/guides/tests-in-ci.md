@@ -22,12 +22,6 @@ project yet; plain script suites work (`[test] runner = "script"`).
 
 ## On GitHub Actions
 
-:::caution[Not run on a clean runner yet]
-There is no release yet, so the install step below fails today, and this workflow has not been run end to end on a
-clean runner. Until v0.1.0 is out, build `gdt` from source in the job (`cargo install --path crates/gdt --locked` in a
-checkout of this repository).
-:::
-
 ```yaml title=".github/workflows/tests.yml"
 name: Tests
 
