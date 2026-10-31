@@ -38,7 +38,9 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 
 ### Security
 
-- Addon names and folders that come from `gdt.toml`, `gdt.lock` or the command line are validated, so none of them can read, write or delete outside `addons/`. A key that gdt does not know in `gdt.toml` is an error.
+- Addon names and folders that come from `gdt.toml`, `gdt.lock` or the command line are validated, so none of them can read, write or delete outside `addons/`. A key that gdt does not know in `gdt.toml` is an error. Names may only have letters, digits, spaces, `.`, `_` and `-`.
+- Addon archives cannot contain symbolic links, and no archive entry is written through a link made by an earlier entry, so an archive cannot write outside the folder it is unpacked into.
+- gdt does not follow symbolic links for `addons/`, an addon folder, `gdt.toml`, `gdt.lock` or `.gitignore`, so a cloned project cannot make it read, write or delete elsewhere.
 - `-v` and `-vv` mask `Authorization` headers, GitHub tokens and the value of `GH_TOKEN`/`GITHUB_TOKEN` before printing.
 - Downloads are verified against published checksums before use; a cached release list that cannot be read is discarded.
 

@@ -14,10 +14,13 @@ const RESERVED: [&str; 22] = [
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// Letters, digits, `.`, `_`, `-` and spaces: the name is written into
+/// `.gitignore` and printed, so characters a shell or Git treats specially
+/// (`$ ( ) ; & ' ! # ~ [ ] { } * ?` and the like) are out.
 fn has_forbidden_char(text: &str) -> bool {
-    text.chars().any(|c| {
-        c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
-    })
+    !text
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | ' '))
 }
 
 fn is_reserved(component: &str) -> bool {
@@ -36,7 +39,7 @@ pub fn addon_name_problem(name: &str) -> Option<&'static str> {
     } else if name.starts_with(' ') || name.ends_with(' ') || name.ends_with('.') {
         Some("it starts or ends with a space, or ends with a dot")
     } else if has_forbidden_char(name) {
-        Some("it has a path separator or a character that is not allowed in file names")
+        Some("it may only have letters, digits, spaces, `.`, `_` and `-`")
     } else if is_reserved(name) {
         Some("it is a reserved name on Windows")
     } else {
@@ -87,6 +90,8 @@ mod tests {
             "gd_unit4",
             "my addon",
             "console",
+            "Godot_Jolt-2",
+            "añadido",
         ] {
             assert_eq!(addon_name_problem(ok), None, "{ok:?}");
         }
@@ -121,6 +126,16 @@ mod tests {
             "a<b",
             "tab\tname",
             "nul\0byte",
+            "x$(touch pwned)",
+            "a; rm -rf ~ #",
+            "a`b`",
+            "a&b",
+            "it's",
+            "!important",
+            "a[1]",
+            "{a,b}",
+            "~",
+            "50%",
             long.as_str(),
         ] {
             assert!(addon_name_problem(bad).is_some(), "{bad:?}");

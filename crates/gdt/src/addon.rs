@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
+use godot_dev_tools::guard::refuse_symlink;
 use godot_dev_tools::{
     AddonEntry, AddonError, AddonStatus, ArchiveJob, EngineFeatures, Fetched, GitMode,
     GithubSource, InstallPlan, LOCK_FILE, LibraryAsset, LockFile, LockedAddon, MANIFEST_FILE,
@@ -156,6 +157,8 @@ impl Project {
     fn update_gitignore(&self, mode: GitMode, lock: &LockFile) -> Result<()> {
         let names: Vec<&str> = lock.addons.iter().map(|a| a.name.as_str()).collect();
         let lines = ignore_lines(mode, &names);
+        refuse_symlink(&self.gitignore)
+            .with_context(|| format!("could not update {}", self.gitignore.display()))?;
         let current = fs::read_to_string(&self.gitignore).unwrap_or_default();
         let updated = set_ignore_block(&current, &lines);
         if updated != current {

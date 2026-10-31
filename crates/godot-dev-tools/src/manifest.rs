@@ -15,6 +15,7 @@ use std::path::Path;
 use serde::Deserialize;
 use toml_edit::{DocumentMut, Item, Table, value};
 
+use crate::guard::refuse_symlink;
 use crate::names::{addon_name_problem, normalize_subdir};
 
 /// The name of the project file.
@@ -120,6 +121,7 @@ pub struct Manifest {
 impl Manifest {
     /// Reads the file at `path`.
     pub fn read(path: &Path) -> Result<Self, ManifestError> {
+        check_read(path)?;
         let text = fs::read_to_string(path).map_err(|source| ManifestError::Read {
             path: path.display().to_string(),
             source,
@@ -178,7 +180,23 @@ impl Manifest {
     }
 }
 
+/// `gdt.toml` is read and rewritten by gdt, so it must be a real file in the project.
+fn check_read(path: &Path) -> Result<(), ManifestError> {
+    refuse_symlink(path).map_err(|source| ManifestError::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn check_write(path: &Path) -> Result<(), ManifestError> {
+    refuse_symlink(path).map_err(|source| ManifestError::Write {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
 fn load_document(path: &Path) -> Result<DocumentMut, ManifestError> {
+    check_read(path)?;
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -197,6 +215,7 @@ fn load_document(path: &Path) -> Result<DocumentMut, ManifestError> {
 }
 
 fn save_document(path: &Path, doc: &DocumentMut) -> Result<(), ManifestError> {
+    check_write(path)?;
     fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.display().to_string(),
         source,
@@ -258,6 +277,7 @@ pub fn pin(path: &Path, version: &str) -> Result<(), ManifestError> {
         path: path.display().to_string(),
         message,
     };
+    check_read(path)?;
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -275,6 +295,7 @@ pub fn pin(path: &Path, version: &str) -> Result<(), ManifestError> {
         doc["godot"] = toml_edit::table();
     }
     doc["godot"]["version"] = value(version);
+    check_write(path)?;
     fs::write(path, doc.to_string()).map_err(|source| ManifestError::Write {
         path: path.display().to_string(),
         source,
@@ -304,6 +325,28 @@ mod tests {
 
         fs::write(&path, "# nothing yet\n").unwrap();
         assert_eq!(Manifest::read(&path).unwrap(), Manifest::default());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_manifest_is_neither_read_nor_written() {
+        let dir = scratch("manifest-linked");
+        let path = dir.join(MANIFEST_FILE);
+        let target = dir.join("elsewhere");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(matches!(
+            Manifest::read(&path),
+            Err(ManifestError::Read { .. })
+        ));
+        assert!(matches!(pin(&path, "4.7"), Err(ManifestError::Read { .. })));
+        let entry = AddonEntry {
+            github: Some("o/r".into()),
+            ..AddonEntry::default()
+        };
+        assert!(set_addon(&path, "gut", &entry).is_err());
+        assert!(remove_addon(&path, "gut").is_err());
+        assert!(!target.exists(), "the link was followed");
         let _ = fs::remove_dir_all(dir);
     }
 

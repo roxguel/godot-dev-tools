@@ -9,7 +9,8 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use crate::engine::{EngineError, extract_zip};
+use crate::engine::{EngineError, Links, extract_zip};
+use crate::guard::refuse_symlink;
 use crate::http::{HttpClient, HttpError};
 use crate::lock::{LockedAddon, hash_dir};
 use crate::names::{addon_name_problem, normalize_subdir};
@@ -380,6 +381,7 @@ pub fn install_archive(
 ) -> Result<Fetched, AddonError> {
     let archive = cached_archive(http, dirs, job, progress)?;
     let addons_dir = project_dir.join("addons");
+    refuse_symlink(&addons_dir).map_err(io_err("could not use the addons folder"))?;
     fs::create_dir_all(&addons_dir).map_err(io_err("could not create the addons folder"))?;
 
     let staging = addons_dir.join(format!(".gdt-tmp-{}", std::process::id()));
@@ -395,7 +397,7 @@ fn place(
     staging: &Path,
     job: &ArchiveJob<'_>,
 ) -> Result<Fetched, AddonError> {
-    extract_zip(archive, staging)?;
+    extract_zip(archive, staging, Links::Reject)?;
     let root = single_root(staging);
 
     let subdir = match job.subdir {
@@ -429,6 +431,7 @@ fn place(
     validate_name(&name)?;
 
     let target = addons_dir.join(&name);
+    refuse_symlink(&target).map_err(io_err(format!("could not use addons/{name}")))?;
     if target.exists() {
         if !job.replace {
             return Err(AddonError::Modified { name });
@@ -444,7 +447,14 @@ fn place(
 /// so that nothing outside `addons/` can be read or deleted through it.
 fn addon_dir(project_dir: &Path, name: &str) -> io::Result<PathBuf> {
     match addon_name_problem(name) {
-        None => Ok(project_dir.join("addons").join(name)),
+        None => {
+            let addons = project_dir.join("addons");
+            let dir = addons.join(name);
+            // A link here would make the reads and deletes leave the project.
+            refuse_symlink(&addons)?;
+            refuse_symlink(&dir)?;
+            Ok(dir)
+        }
         Some(why) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("`{name}` is not a usable addon name: {why}"),
@@ -868,6 +878,82 @@ mod tests {
             assert!(outside.join("data.txt").is_file(), "{bad:?} moved a folder");
             assert!(!project.join("addons/x").exists(), "{bad:?} installed");
         }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_addons_folder_is_never_followed() {
+        let root = scratch("addon-linked");
+        let project = root.join("project");
+        let outside = root.join("precious");
+        fs::create_dir_all(project.join("x")).unwrap();
+        fs::create_dir_all(outside.join("gut")).unwrap();
+        fs::write(outside.join("gut/data.txt"), "mine").unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("addons")).unwrap();
+
+        let fake = Fake::new(&[("o-r-abc/addons/gut/plugin.cfg", "x")]);
+        let src = source();
+        let result = install_github(
+            &fake,
+            &dirs(&root),
+            &project,
+            &plan(&src, None, None, true),
+            &mut NoProgress,
+        );
+        assert!(result.is_err());
+        assert!(remove_addon_dir(&project, "gut").is_err());
+        let locked = LockedAddon {
+            name: "gut".into(),
+            source: "github:o/r".into(),
+            rev: SHA.into(),
+            subdir: ".".into(),
+            hash: "sha256:0".into(),
+        };
+        assert!(addon_status(&project, &locked).is_err());
+        assert!(
+            outside.join("gut/data.txt").is_file(),
+            "nothing was deleted"
+        );
+        assert!(
+            !outside.join("gut/plugin.cfg").exists(),
+            "nothing was written"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_addon_archive_with_a_link_installs_nothing() {
+        let root = scratch("addon-with-link");
+        let project = root.join("project");
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        writer.start_file("o-r-abc/plugin.cfg", options).unwrap();
+        writer.write_all(b"x").unwrap();
+        writer
+            .add_symlink("o-r-abc/link", "plugin.cfg", options)
+            .unwrap();
+        let fake = Fake {
+            archive: writer.finish().unwrap().into_inner(),
+            downloads: RefCell::new(0),
+            urls: RefCell::new(vec![]),
+        };
+        let src = source();
+        let result = install_github(
+            &fake,
+            &dirs(&root),
+            &project,
+            &plan(&src, None, Some("gut"), false),
+            &mut NoProgress,
+        );
+        assert!(
+            matches!(
+                result,
+                Err(AddonError::Archive(EngineError::UnsafeArchive(_)))
+            ),
+            "{result:?}"
+        );
+        assert!(!project.join("addons/gut").exists());
         let _ = fs::remove_dir_all(root);
     }
 
