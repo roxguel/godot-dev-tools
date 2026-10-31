@@ -32,6 +32,8 @@ store = "mikeschulze/gdunit4"
 dev = true                      # needed to work on the project, not shipped: see "Development addons"
 ```
 
+An entry names exactly one source (`github`, `store` or `library`). A key `gdt` does not know, in `gdt.toml` or in any of its tables, is an error that names the key, so a typo such as `versoin` or a `git` key put inside an addon cannot be ignored silently. (The `url` and `sha256` keys above are planned; they are refused until they exist.)
+
 `gdt.lock` records the exact resolved source: commit SHA for GitHub, release id and download details for stores, plus the content hash of the extracted files for every source. `gdt addon install` reproduces the lock exactly and fails if a hash does not match.
 
 ## Sources

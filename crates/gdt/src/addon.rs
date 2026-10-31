@@ -227,6 +227,22 @@ fn parse_source(text: &str) -> Result<(Kind, Option<String>)> {
 
 /// The source an `[addons.<name>]` entry stands for.
 fn entry_kind(name: &str, entry: &AddonEntry) -> Result<Kind> {
+    let given = [
+        ("github", entry.github.is_some()),
+        ("store", entry.store.is_some()),
+        ("library", entry.library.is_some()),
+    ]
+    .iter()
+    .filter(|(_, set)| *set)
+    .map(|(key, _)| *key)
+    .collect::<Vec<_>>();
+    if given.len() > 1 {
+        return Err(UsageError(format!(
+            "[addons.{name}] names more than one source ({}); keep only one",
+            given.join(", ")
+        ))
+        .into());
+    }
     if let Some(github) = &entry.github {
         let mut source = GithubSource::parse(&format!("github:{github}"))?;
         source.git_ref = entry.git_ref.clone();
@@ -885,4 +901,43 @@ pub fn sync(args: &SyncArgs, ctx: &Ctx) -> Result<()> {
         Err(error) => return Err(error),
     }
     install_all(&project, ctx, false, args.no_dev, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(github: bool, store: bool, library: bool) -> AddonEntry {
+        AddonEntry {
+            github: github.then(|| "o/r".to_string()),
+            store: store.then(|| "pub/asset".to_string()),
+            library: library.then(|| "123".to_string()),
+            ..AddonEntry::default()
+        }
+    }
+
+    #[test]
+    fn an_entry_needs_exactly_one_source() {
+        assert!(matches!(
+            entry_kind("x", &entry(true, false, false)).unwrap(),
+            Kind::Github(_)
+        ));
+        assert!(matches!(
+            entry_kind("x", &entry(false, true, false)).unwrap(),
+            Kind::Store(_)
+        ));
+        assert!(matches!(
+            entry_kind("x", &entry(false, false, true)).unwrap(),
+            Kind::Library(_)
+        ));
+        for (g, s, l) in [
+            (false, false, false),
+            (true, true, false),
+            (true, true, true),
+        ] {
+            let error = entry_kind("x", &entry(g, s, l)).err().unwrap();
+            assert!(error.downcast_ref::<UsageError>().is_some(), "{g} {s} {l}");
+            assert!(error.to_string().contains("[addons.x]"));
+        }
+    }
 }
