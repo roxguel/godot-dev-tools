@@ -15,6 +15,8 @@ use std::path::Path;
 use serde::Deserialize;
 use toml_edit::{DocumentMut, Item, Table, value};
 
+use crate::names::{addon_name_problem, normalize_subdir};
+
 /// The name of the project file.
 pub const MANIFEST_FILE: &str = "gdt.toml";
 
@@ -145,9 +147,21 @@ impl Manifest {
                     }
                 };
             } else {
+                if let Some(why) = addon_name_problem(&key) {
+                    return Err(invalid(format!(
+                        "[addons.{key}]: the name cannot be used: {why}"
+                    )));
+                }
                 let entry: AddonEntry = item
                     .try_into()
                     .map_err(|e: toml::de::Error| invalid(format!("[addons.{key}]: {e}")))?;
+                if let Some(subdir) = &entry.subdir {
+                    if let Err(why) = normalize_subdir(subdir) {
+                        return Err(invalid(format!(
+                            "[addons.{key}]: subdir `{subdir}` cannot be used: {why}"
+                        )));
+                    }
+                }
                 addons.insert(key, entry);
             }
         }
@@ -545,6 +559,40 @@ version = \"4.7.2\"  # pinned
             Some("4.8-rc1")
         );
         assert!(fs::read_to_string(&path).unwrap().contains("[addons.gut]"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn addon_names_and_subdirs_that_escape_are_refused() {
+        let dir = scratch("manifest-escape");
+        let path = dir.join(MANIFEST_FILE);
+        for text in [
+            "[addons.\"..\"]
+github = \"o/r\"
+",
+            "[addons.\"../x\"]
+github = \"o/r\"
+",
+            "[addons.con]
+github = \"o/r\"
+",
+            "[addons.gut]
+github = \"o/r\"
+subdir = \"..\"
+",
+            "[addons.gut]
+github = \"o/r\"
+subdir = \"C:\\x\"
+",
+            "[addons.gut]
+github = \"o/r\"
+subdir = \"/etc\"
+",
+        ] {
+            fs::write(&path, text).unwrap();
+            let err = Manifest::read(&path).unwrap_err();
+            assert!(matches!(err, ManifestError::Invalid { .. }), "{text:?}");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -248,7 +248,7 @@ fn exit_code(error: &anyhow::Error) -> u8 {
     }
     if let Some(error) = error.downcast_ref::<AddonError>() {
         return match error {
-            AddonError::BadSource(_) | AddonError::BadName(_) => 2,
+            AddonError::BadSource(_) | AddonError::BadName { .. } => 2,
             AddonError::Http(_) => 3,
             AddonError::NotFound(_) => 4,
             AddonError::HashMismatch { .. } => 5,

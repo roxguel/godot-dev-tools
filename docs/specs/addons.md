@@ -86,6 +86,7 @@ Why this is more than Godot's own export filters: a preset's `exclude_filter` is
 ## Installation rules
 
 - An addon is installed into `addons/<name>/`. Nothing outside `addons/` is written, except the files `gdt` owns (`gdt.toml`, `gdt.lock`, and its `.gitignore` block).
+- Names and folders are checked wherever they come from (the command line, `gdt.toml`, `gdt.lock`), because `gdt` creates and deletes `addons/<name>/` and moves `subdir` out of the archive. A name is one plain folder name: no separators, no leading dot, no trailing space or dot, no characters Windows forbids, and not a reserved Windows name (`con`, `nul`, `com1`...). A `subdir` is a relative path of plain folder names (`.` means the whole archive): no absolute paths, no drive letters, no `..`. A file that breaks these rules is refused as a whole, with the offending name in the message.
 - Enabling the plugin (`editor_plugins/enabled` in `project.godot`) is **not** done automatically; `gdt addon add` prints the line to add, or enables it with `--enable`.
 - No transitive dependencies in the first version.
 - Paid assets are never purchased by `gdt`; see [authentication.md](authentication.md).
