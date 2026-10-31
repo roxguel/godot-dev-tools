@@ -12,6 +12,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::guard::refuse_symlink;
 use crate::manifest::GitMode;
 use crate::names::{addon_name_problem, normalize_subdir};
 
@@ -71,6 +72,10 @@ impl Default for LockFile {
 impl LockFile {
     /// Reads the file at `path`; a missing file is an empty lockfile.
     pub fn load(path: &Path) -> Result<Self, LockError> {
+        refuse_symlink(path).map_err(|source| LockError::Read {
+            path: path.display().to_string(),
+            source,
+        })?;
         let text = match fs::read_to_string(path) {
             Ok(text) => text,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
@@ -115,6 +120,10 @@ impl LockFile {
                 message: e.to_string(),
             })?
         );
+        refuse_symlink(path).map_err(|source| LockError::Write {
+            path: path.display().to_string(),
+            source,
+        })?;
         fs::write(path, text).map_err(|source| LockError::Write {
             path: path.display().to_string(),
             source,
@@ -313,6 +322,24 @@ mod tests {
         fs::write(dir.join(LOCK_FILE), "version = [").unwrap();
         let err = LockFile::load(&dir.join(LOCK_FILE)).unwrap_err();
         assert!(matches!(err, LockError::Invalid { .. }));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_lockfile_is_neither_read_nor_written() {
+        let dir = scratch("lock-linked");
+        let target = dir.join("elsewhere");
+        std::os::unix::fs::symlink(&target, dir.join(LOCK_FILE)).unwrap();
+        assert!(matches!(
+            LockFile::load(&dir.join(LOCK_FILE)),
+            Err(LockError::Read { .. })
+        ));
+        assert!(matches!(
+            LockFile::default().save(&dir.join(LOCK_FILE)),
+            Err(LockError::Write { .. })
+        ));
+        assert!(!target.exists(), "the link was followed");
         let _ = fs::remove_dir_all(dir);
     }
 

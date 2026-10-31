@@ -218,9 +218,21 @@ fn fetch_archive(
     Ok(dest)
 }
 
+/// Whether an archive may contain symbolic links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Links {
+    /// Links that stay inside the extraction folder are created. For archives
+    /// whose bytes are verified against a published checksum (the engine).
+    Allow,
+    /// Any link is an error. For archives that anyone can publish (addons), which
+    /// have no use for links.
+    Reject,
+}
+
 /// Extracts a zip into `dest`. Entries that would land outside `dest` (absolute
-/// paths, `..`) and symbolic links that point outside it are rejected.
-pub fn extract_zip(archive: &Path, dest: &Path) -> Result<(), EngineError> {
+/// paths, `..`), entries written through a link and, depending on `links`, symbolic
+/// links are rejected.
+pub fn extract_zip(archive: &Path, dest: &Path, links: Links) -> Result<(), EngineError> {
     let file = File::open(archive).map_err(io_err("could not open the archive"))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| EngineError::Archive(e.to_string()))?;
     fs::create_dir_all(dest).map_err(io_err("could not create the install folder"))?;
@@ -234,6 +246,16 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<(), EngineError> {
         })?;
         let out = dest.join(&relative);
         let context = format!("could not extract {}", relative.display());
+
+        if entry.is_symlink() && links == Links::Reject {
+            return Err(EngineError::UnsafeArchive(format!(
+                "{} is a symbolic link",
+                relative.display()
+            )));
+        }
+        // A link made by an earlier entry must not redirect this one: the check on
+        // where a link points is textual and cannot see links on the way there.
+        ensure_no_link_on_the_way(dest, &relative)?;
 
         if entry.is_dir() {
             fs::create_dir_all(&out).map_err(io_err(context))?;
@@ -252,13 +274,39 @@ pub fn extract_zip(archive: &Path, dest: &Path) -> Result<(), EngineError> {
             continue;
         }
 
-        let mut file = File::create(&out).map_err(io_err(context.clone()))?;
+        // `create_new` fails if something, a link included, is already there.
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&out)
+            .map_err(io_err(context.clone()))?;
         io::copy(&mut entry, &mut file).map_err(io_err(context.clone()))?;
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o777))
                 .map_err(io_err(context))?;
+        }
+    }
+    Ok(())
+}
+
+/// Fails if a folder on the way from `dest` to `relative` is a symbolic link.
+fn ensure_no_link_on_the_way(dest: &Path, relative: &Path) -> Result<(), EngineError> {
+    let folders = relative.components().count().saturating_sub(1);
+    let mut current = dest.to_path_buf();
+    for component in relative.components().take(folders) {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(EngineError::UnsafeArchive(format!(
+                    "{} goes through a symbolic link",
+                    relative.display()
+                )));
+            }
+            Ok(_) => {}
+            // Not created yet: it will be made here as a real folder.
+            Err(_) => break,
         }
     }
     Ok(())
@@ -476,7 +524,7 @@ pub fn install_build(
     fs::create_dir_all(&versions).map_err(io_err("could not create the versions folder"))?;
     let staging = versions.join(format!(".tmp-{build}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&staging);
-    if let Err(error) = extract_zip(&archive, &staging) {
+    if let Err(error) = extract_zip(&archive, &staging, Links::Allow) {
         let _ = fs::remove_dir_all(&staging);
         return Err(error);
     }
@@ -582,7 +630,7 @@ mod tests {
         )
         .unwrap();
         let out = dir.join("out");
-        extract_zip(&archive, &out).unwrap();
+        extract_zip(&archive, &out, Links::Allow).unwrap();
         assert_eq!(fs::read(out.join("Godot.exe")).unwrap(), b"exe");
         assert_eq!(
             fs::read(out.join("GodotSharp").join("lib.dll")).unwrap(),
@@ -597,12 +645,98 @@ mod tests {
         let archive = dir.join("evil.zip");
         fs::write(&archive, zip_bytes(&[("../evil.txt", b"x")])).unwrap();
         let out = dir.join("out");
-        let result = extract_zip(&archive, &out);
+        let result = extract_zip(&archive, &out, Links::Allow);
         assert!(
             matches!(result, Err(EngineError::UnsafeArchive(_))),
             "{result:?}"
         );
         assert!(!dir.join("evil.txt").exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn zip_with_links(entries: &[(&str, Option<&str>)]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, link) in entries {
+            match link {
+                Some(target) => writer.add_symlink(*name, *target, options).unwrap(),
+                None => {
+                    writer.start_file(*name, options).unwrap();
+                    writer.write_all(b"owned").unwrap();
+                }
+            }
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn addon_archives_may_not_contain_links() {
+        let dir = scratch("extract-reject-links");
+        let archive = dir.join("addon.zip");
+        fs::write(
+            &archive,
+            zip_with_links(&[("plugin.cfg", None), ("docs", Some("."))]),
+        )
+        .unwrap();
+        let out = dir.join("out");
+        let result = extract_zip(&archive, &out, Links::Reject);
+        assert!(
+            matches!(result, Err(EngineError::UnsafeArchive(_))),
+            "{result:?}"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Each list is a zip whose last entry, written through the links before it,
+    /// would land in the folder above the extraction folder.
+    #[cfg(unix)]
+    #[test]
+    fn entries_cannot_be_written_through_links_to_escape() {
+        let attacks: [&[(&str, Option<&str>)]; 2] = [
+            // `s` is the folder itself, so `s/out` really lives in it and points above it.
+            &[
+                ("s", Some(".")),
+                ("s/out", Some("..")),
+                ("s/out/pwned", None),
+            ],
+            // `a/b` is the folder itself, so `a/b/c` is `c` in it, and points above it.
+            &[
+                ("a/b", Some("..")),
+                ("a/b/c", Some("..")),
+                ("a/b/c/pwned", None),
+            ],
+        ];
+        for (index, entries) in attacks.iter().enumerate() {
+            let dir = scratch(&format!("extract-link-escape-{index}"));
+            let archive = dir.join("evil.zip");
+            fs::write(&archive, zip_with_links(entries)).unwrap();
+            let out = dir.join("out");
+            let result = extract_zip(&archive, &out, Links::Allow);
+            assert!(
+                matches!(result, Err(EngineError::UnsafeArchive(_))),
+                "attack {index}: {result:?}"
+            );
+            assert!(!dir.join("pwned").exists(), "attack {index} escaped");
+            let _ = fs::remove_dir_all(dir);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_inside_the_folder_are_still_created_when_allowed() {
+        let dir = scratch("extract-links-ok");
+        let archive = dir.join("engine.zip");
+        fs::write(
+            &archive,
+            zip_with_links(&[
+                ("App/Versions/A/lib", None),
+                ("App/Current", Some("Versions/A")),
+            ]),
+        )
+        .unwrap();
+        let out = dir.join("out");
+        extract_zip(&archive, &out, Links::Allow).unwrap();
+        assert_eq!(fs::read(out.join("App/Current/lib")).unwrap(), b"owned");
         let _ = fs::remove_dir_all(dir);
     }
 

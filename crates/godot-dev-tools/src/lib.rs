@@ -7,6 +7,7 @@
 pub mod addons;
 pub mod config;
 pub mod engine;
+pub mod guard;
 pub mod http;
 pub mod lock;
 pub mod manifest;
