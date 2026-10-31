@@ -1,5 +1,3 @@
 * text=auto eol=lf
 *.png binary
 *.zip binary
-# The installer is run by sh, which does not accept CRLF.
-*.sh text eol=lf
