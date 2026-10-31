@@ -49,7 +49,11 @@ EOF
 # --- network ------------------------------------------------------------------
 
 # When the default GitHub URL is used, nothing but HTTPS is accepted.
-proto_curl() { [ -z "${GDT_BASE_URL:-}" ] && printf '%s' "--proto =https --tlsv1.2" || true; }
+proto_curl() {
+    if [ -z "${GDT_BASE_URL:-}" ]; then
+        printf '%s' "--proto =https --tlsv1.2"
+    fi
+}
 
 download() { # url file
     if have curl; then
