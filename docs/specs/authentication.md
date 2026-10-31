@@ -1,6 +1,6 @@
 # Authentication
 
-Status: Draft. Based on the Asset Store's public OpenAPI document (<https://store.godotengine.org/api/v1/openapi.json>, API version 1.1.0) read on 2026-10-30. Items marked *unverified* need an account to confirm.
+Status: Draft, not implemented: no `gdt auth` command exists yet, and paid assets are refused with exit code 6. Based on the Asset Store's public OpenAPI document (<https://store.godotengine.org/api/v1/openapi.json>, API version 1.1.0) read on 2026-10-30. Items marked *unverified* need an account to confirm.
 
 ## What the Asset Store API offers
 

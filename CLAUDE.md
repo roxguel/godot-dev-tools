@@ -15,4 +15,5 @@ Godot Development Tools: a cross-platform Rust CLI (`gdt`) that manages Godot ve
 - **Platforms:** Windows, Linux and macOS must compile and pass unit tests in CI. Do not use OS-specific code outside a platform module.
 - **Network and filesystem** access behind traits so it can be tested without either.
 - **Short options:** give an option a one-letter form when it is frequent and harmless, with one letter meaning one thing everywhere (rules in `docs/specs/cli.md`, "Short options"). Rare or destructive options stay long-only.
+- **Before a pull request:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo test --workspace --locked` pass. Names and paths from outside go through `names.rs` (see `CONTRIBUTING.md`).
 - **Trademark:** never use the Godot logo; keep the "not affiliated" notice in the README.

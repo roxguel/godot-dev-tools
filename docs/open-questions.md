@@ -9,8 +9,7 @@ Status: Draft. Remove an item when it is answered, and record the answer in a sp
 3. **Godot trademark policy, full text.** Only excerpts were reviewed. Read the whole policy at <https://godot.foundation/policies-and-procedures/trademark-policy> and ask the Foundation in writing if anything about the name is unclear.
 4. **Asset Store with an account.** The API is public and documented (see [authentication.md](specs/authentication.md)). Still to verify with an account: where a user creates an API key, whether a purchased asset's `download_url` is only returned with the bearer token, and how a paid asset behaves without one. Also whether the Asset Library's REST API is still served, and its response shape.
 5. **gdUnit4 run for real.** Its command line and exit handling are taken from its own `runtest.sh` and source, but it has not been run: read its JUnit report (written under the `-rd` folder in a numbered subfolder) and confirm the exit codes and that `--ignoreHeadlessMode` is enough in CI.
-6. **Windows shim.** A small separate `.exe` shim versus a `.cmd` file; behavior when stdin/stdout are attached to a console, signal and exit code forwarding.
-7. **.NET flavor.** Needs the .NET SDK on the machine; decide what `gdt doctor` checks and what `gdt install` says about it.
+6. **.NET flavor.** Needs the .NET SDK on the machine; decide what `gdt doctor` checks and what `gdt install` says about it.
 
 ## Decisions pending
 
