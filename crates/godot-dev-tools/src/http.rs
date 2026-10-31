@@ -8,6 +8,10 @@ const MAX_BODY_BYTES: u64 = 64 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(30);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const CHUNK_BYTES: usize = 64 * 1024;
+/// The most a single download may write to disk. The biggest file gdt fetches, a
+/// .NET editor build, is a few hundred MiB; the limit only stops a server (an
+/// addon's `download_url` is chosen by its publisher) from filling the disk.
+pub const MAX_DOWNLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// Errors from an HTTP request.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -121,13 +125,17 @@ impl UreqClient {
     /// `token` is an optional GitHub token. It is sent only to `api.github.com`,
     /// never to any other host, and is never printed.
     pub fn new(user_agent: &str, token: Option<String>) -> Self {
+        // HTTPS only, redirects included: a `download_url` from a store, or a
+        // redirect, must not downgrade a download to plain text.
         let config = ureq::Agent::config_builder()
             .user_agent(user_agent)
+            .https_only(true)
             .http_status_as_error(false)
             .timeout_global(Some(TIMEOUT))
             .build();
         let download_config = ureq::Agent::config_builder()
             .user_agent(user_agent)
+            .https_only(true)
             .http_status_as_error(false)
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .timeout_recv_response(Some(TIMEOUT))
@@ -209,18 +217,37 @@ impl HttpClient for UreqClient {
 
         let total = header_value(&headers, "content-length").and_then(|v| v.parse().ok());
         let mut reader = response.body_mut().as_reader();
-        let mut buffer = vec![0u8; CHUNK_BYTES];
-        loop {
-            let read = reader
-                .read(&mut buffer)
-                .map_err(|e| network(e.to_string()))?;
-            if read == 0 {
-                return Ok(());
-            }
-            sink.write_all(&buffer[..read])
-                .map_err(|e| network(format!("could not write the download: {e}")))?;
-            on_chunk(total, read as u64);
+        copy_limited(&mut reader, sink, MAX_DOWNLOAD_BYTES, total, on_chunk).map_err(network)
+    }
+}
+
+/// Copies `reader` into `sink` in chunks, failing with a message once more than
+/// `limit` bytes have come (or the server announced more than that up front).
+fn copy_limited(
+    reader: &mut dyn Read,
+    sink: &mut dyn Write,
+    limit: u64,
+    total: Option<u64>,
+    on_chunk: &mut dyn FnMut(Option<u64>, u64),
+) -> Result<(), String> {
+    let too_big = || format!("the download is larger than the {} MiB limit", limit >> 20);
+    if total.is_some_and(|t| t > limit) {
+        return Err(too_big());
+    }
+    let mut buffer = vec![0u8; CHUNK_BYTES];
+    let mut written = 0u64;
+    loop {
+        let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            return Ok(());
         }
+        written += read as u64;
+        if written > limit {
+            return Err(too_big());
+        }
+        sink.write_all(&buffer[..read])
+            .map_err(|e| format!("could not write the download: {e}"))?;
+        on_chunk(total, read as u64);
     }
 }
 
@@ -326,5 +353,52 @@ mod tests {
         };
         assert_eq!(r.header("link"), Some("x"));
         assert_eq!(r.header("etag"), None);
+    }
+
+    #[test]
+    fn a_download_is_copied_whole_within_the_limit() {
+        let data = vec![7u8; CHUNK_BYTES * 2 + 5];
+        let mut sink = Vec::new();
+        let mut seen = 0;
+        copy_limited(
+            &mut data.as_slice(),
+            &mut sink,
+            data.len() as u64,
+            Some(data.len() as u64),
+            &mut |_, read| seen += read,
+        )
+        .unwrap();
+        assert_eq!(sink, data);
+        assert_eq!(seen, data.len() as u64);
+    }
+
+    #[test]
+    fn a_download_over_the_limit_stops() {
+        let data = vec![7u8; CHUNK_BYTES * 3];
+        // The server says nothing about the size: it is stopped while reading.
+        let mut sink = Vec::new();
+        let error = copy_limited(
+            &mut data.as_slice(),
+            &mut sink,
+            CHUNK_BYTES as u64 + 1,
+            None,
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert!(error.contains("limit"), "{error}");
+        assert!(sink.len() <= CHUNK_BYTES + 1, "it kept writing");
+
+        // The server announces too much: nothing is read at all.
+        let mut sink = Vec::new();
+        let error = copy_limited(
+            &mut data.as_slice(),
+            &mut sink,
+            10,
+            Some(11),
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert!(error.contains("limit"), "{error}");
+        assert!(sink.is_empty());
     }
 }

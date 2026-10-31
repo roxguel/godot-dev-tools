@@ -48,6 +48,8 @@ pub enum EngineError {
     UnsafeArchive(String),
     #[error("could not read the archive: {0}")]
     Archive(String),
+    #[error("the archive unpacks to too much data ({0})")]
+    TooLarge(String),
     #[error("{context}: {source}")]
     Io {
         context: String,
@@ -229,13 +231,50 @@ pub enum Links {
     Reject,
 }
 
+/// How much an archive may unpack to: a few kilobytes of zip can expand to
+/// terabytes, and an addon's archive comes from whoever published it.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    entries: usize,
+    bytes: u64,
+}
+
+/// Far above the largest Godot build (a .NET editor unpacks to under 2 GiB).
+const LIMITS: Limits = Limits {
+    entries: 200_000,
+    bytes: 8 * 1024 * 1024 * 1024,
+};
+
+/// The longest a symbolic link's target may be (`PATH_MAX`).
+const MAX_LINK_TARGET: u64 = 4096;
+
 /// Extracts a zip into `dest`. Entries that would land outside `dest` (absolute
 /// paths, `..`), entries written through a link and, depending on `links`, symbolic
-/// links are rejected.
+/// links are rejected, and so is an archive that unpacks to more than a fixed limit.
 pub fn extract_zip(archive: &Path, dest: &Path, links: Links) -> Result<(), EngineError> {
+    extract_with_limits(archive, dest, links, LIMITS)
+}
+
+fn extract_with_limits(
+    archive: &Path,
+    dest: &Path,
+    links: Links,
+    limits: Limits,
+) -> Result<(), EngineError> {
+    let too_large = || {
+        EngineError::TooLarge(format!(
+            "more than {} entries or {} MiB",
+            limits.entries,
+            limits.bytes >> 20
+        ))
+    };
     let file = File::open(archive).map_err(io_err("could not open the archive"))?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| EngineError::Archive(e.to_string()))?;
+    if zip.len() > limits.entries {
+        return Err(too_large());
+    }
     fs::create_dir_all(dest).map_err(io_err("could not create the install folder"))?;
+    let mut remaining = limits.bytes;
 
     for index in 0..zip.len() {
         let mut entry = zip
@@ -267,7 +306,8 @@ pub fn extract_zip(archive: &Path, dest: &Path, links: Links) -> Result<(), Engi
 
         if entry.is_symlink() {
             let mut target = String::new();
-            entry
+            (&mut entry)
+                .take(MAX_LINK_TARGET)
                 .read_to_string(&mut target)
                 .map_err(io_err(context.clone()))?;
             make_symlink(&target, &out, &relative)?;
@@ -280,7 +320,13 @@ pub fn extract_zip(archive: &Path, dest: &Path, links: Links) -> Result<(), Engi
             .create_new(true)
             .open(&out)
             .map_err(io_err(context.clone()))?;
-        io::copy(&mut entry, &mut file).map_err(io_err(context.clone()))?;
+        // What the entry says its size is cannot be trusted; count what comes out.
+        let written = io::copy(&mut (&mut entry).take(remaining + 1), &mut file)
+            .map_err(io_err(context.clone()))?;
+        if written > remaining {
+            return Err(too_large());
+        }
+        remaining -= written;
         #[cfg(unix)]
         if let Some(mode) = entry.unix_mode() {
             use std::os::unix::fs::PermissionsExt;
@@ -667,6 +713,38 @@ mod tests {
             }
         }
         writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn an_archive_that_unpacks_to_too_much_is_refused() {
+        let dir = scratch("extract-limits");
+        let archive = dir.join("bomb.zip");
+        // A megabyte of zeros is a few kilobytes of zip.
+        fs::write(
+            &archive,
+            zip_bytes(&[("a.bin", &vec![0u8; 1 << 20]), ("b.bin", b"x")]),
+        )
+        .unwrap();
+        let limits = |entries, bytes| Limits { entries, bytes };
+
+        let out = dir.join("small");
+        let result = extract_with_limits(&archive, &out, Links::Reject, limits(10, 1 << 19));
+        assert!(
+            matches!(result, Err(EngineError::TooLarge(_))),
+            "{result:?}"
+        );
+
+        let out = dir.join("few");
+        let result = extract_with_limits(&archive, &out, Links::Reject, limits(1, 1 << 30));
+        assert!(
+            matches!(result, Err(EngineError::TooLarge(_))),
+            "{result:?}"
+        );
+
+        let out = dir.join("fits");
+        extract_with_limits(&archive, &out, Links::Reject, limits(2, (1 << 20) + 1)).unwrap();
+        assert_eq!(fs::read(out.join("b.bin")).unwrap(), b"x");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

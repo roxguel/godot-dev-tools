@@ -237,20 +237,57 @@ fn sha256_file(path: &Path) -> io::Result<String> {
         .collect())
 }
 
+/// The name an archive has in the cache. `file_name` has odd characters replaced,
+/// so two different sources can end up with the same one; the start of a digest of
+/// the URL tells them apart.
+fn cache_file_name(job: &ArchiveJob<'_>) -> String {
+    use sha2::{Digest, Sha256};
+    let digest: String = Sha256::digest(job.url.as_bytes())
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("{digest}-{}", job.file_name)
+}
+
 fn cached_archive(
     http: &dyn HttpClient,
     dirs: &Dirs,
     job: &ArchiveJob<'_>,
     progress: &mut dyn Progress,
 ) -> Result<PathBuf, AddonError> {
+    // The `download_url` of a store asset is chosen by its publisher.
+    if !job.url.starts_with("https://") {
+        return Err(AddonError::BadSource(format!(
+            "{} would be downloaded over plain HTTP ({}); gdt only downloads over HTTPS",
+            job.label, job.url
+        )));
+    }
     let cache = dirs.cache_dir();
-    let archive = cache.join(&job.file_name);
+    let cache_name = cache_file_name(job);
+    let archive = cache.join(&cache_name);
+    let expected = job.sha256.filter(|h| !h.is_empty());
     if archive.is_file() {
-        log::debug!("using the cached archive {}", archive.display());
-        return Ok(archive);
+        // A published checksum is checked again on every use, as for engine
+        // builds, so a file that changed in the cache is not trusted.
+        let intact = match expected {
+            Some(expected) => {
+                sha256_file(&archive).is_ok_and(|actual| actual.eq_ignore_ascii_case(expected))
+            }
+            None => true,
+        };
+        if intact {
+            log::debug!("using the cached archive {}", archive.display());
+            return Ok(archive);
+        }
+        log::warn!(
+            "the cached archive {} does not match its checksum; downloading it again",
+            archive.display()
+        );
+        let _ = fs::remove_file(&archive);
     }
     fs::create_dir_all(&cache).map_err(io_err("could not create the cache folder"))?;
-    let part = cache.join(format!("{}.part", job.file_name));
+    let part = cache.join(format!("{cache_name}.part"));
     let file = File::create(&part).map_err(io_err("could not create the download file"))?;
     let mut writer = BufWriter::new(file);
 
@@ -272,7 +309,7 @@ fn cached_archive(
         let _ = fs::remove_file(&part);
         return Err(io_err("could not write the download")(error));
     }
-    if let Some(expected) = job.sha256.filter(|h| !h.is_empty()) {
+    if let Some(expected) = expected {
         let actual = sha256_file(&part).map_err(io_err("could not read the download"))?;
         if !actual.eq_ignore_ascii_case(expected) {
             let _ = fs::remove_file(&part);
@@ -919,6 +956,70 @@ mod tests {
             !outside.join("gut/plugin.cfg").exists(),
             "nothing was written"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn job<'a>(url: &str, file_name: &str, sha256: Option<&'a str>) -> ArchiveJob<'a> {
+        ArchiveJob {
+            file_name: file_name.into(),
+            url: url.into(),
+            label: "o/r".into(),
+            default_name: "gut",
+            subdir: None,
+            name: None,
+            replace: true,
+            sha256,
+        }
+    }
+
+    #[test]
+    fn plain_http_downloads_are_refused() {
+        let root = scratch("addon-http");
+        let fake = Fake::new(&[("o-r-abc/plugin.cfg", "x")]);
+        let result = install_archive(
+            &fake,
+            &dirs(&root),
+            &root.join("project"),
+            &job("http://example.com/a.zip", "a.zip", None),
+            &mut NoProgress,
+        );
+        assert!(
+            matches!(result, Err(AddonError::BadSource(_))),
+            "{result:?}"
+        );
+        assert_eq!(*fake.downloads.borrow(), 0, "nothing was requested");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sources_that_differ_only_in_odd_characters_do_not_share_a_cache_file() {
+        // `file_safe` turns both into `store-a_b-c-1.zip`.
+        let a = job("https://x/a", "store-a_b-c-1.zip", None);
+        let b = job("https://x/b", "store-a_b-c-1.zip", None);
+        assert_ne!(cache_file_name(&a), cache_file_name(&b));
+        assert_eq!(cache_file_name(&a), cache_file_name(&a));
+    }
+
+    #[test]
+    fn a_cached_archive_is_checked_again_when_a_checksum_is_known() {
+        let root = scratch("addon-cache-check");
+        let project = root.join("project");
+        let fake = Fake::new(&[("o-r-abc/plugin.cfg", "x")]);
+        let archive = root.join("reference.zip");
+        fs::write(&archive, &fake.archive).unwrap();
+        let sha = sha256_file(&archive).unwrap();
+        let job = job("https://x/a.zip", "a.zip", Some(&sha));
+
+        install_archive(&fake, &dirs(&root), &project, &job, &mut NoProgress).unwrap();
+        assert_eq!(*fake.downloads.borrow(), 1);
+        install_archive(&fake, &dirs(&root), &project, &job, &mut NoProgress).unwrap();
+        assert_eq!(*fake.downloads.borrow(), 1, "an intact cache is used");
+
+        // Someone changes the cached file.
+        fs::write(dirs(&root).cache_dir().join(cache_file_name(&job)), b"evil").unwrap();
+        install_archive(&fake, &dirs(&root), &project, &job, &mut NoProgress).unwrap();
+        assert_eq!(*fake.downloads.borrow(), 2, "it was downloaded again");
+        assert!(project.join("addons/gut/plugin.cfg").is_file());
         let _ = fs::remove_dir_all(root);
     }
 
