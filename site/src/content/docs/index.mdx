@@ -1,0 +1,70 @@
+---
+title: Godot Development Tools
+description: One command, gdt, to manage Godot versions, addons and tests, the same on every machine.
+template: splash
+hero:
+  tagline: One command, <code>gdt</code>, to manage Godot versions, addons and tests, the same on every machine.
+  actions:
+    - text: Install
+      link: /installation/
+      icon: right-arrow
+    - text: Quick start
+      link: /quick-start/
+      variant: minimal
+---
+
+import { Aside, Card, CardGrid } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Pre-release">
+  Version 0.1.0 is not published yet. The version manager, the `godot` shim, the addon manager and the test runner work
+  and are tested on Windows; Linux and macOS are built and unit-tested in CI but not yet tried by hand. Until the first
+  release, [build it from source](/installation/from-source/).
+</Aside>
+
+<CardGrid>
+  <Card title="Version manager" icon="rocket">
+    Install any official Godot build, checked against its published checksum. Pick one globally or per project, and run
+    the right one from any folder.
+  </Card>
+  <Card title="Addon manager" icon="puzzle">
+    Install addons from GitHub, the Godot Asset Store or the legacy Asset Library, pinned by a lockfile so a fresh
+    clone gets exactly the same files.
+  </Card>
+  <Card title="Test runner" icon="approve-check">
+    Run GUT, gdUnit4 or plain script suites headless, with CI-friendly exit codes and JUnit XML.
+  </Card>
+  <Card title="A godot that follows the project" icon="seti:shell">
+    An optional shim makes a plain `godot` use the version the project asks for, from any folder.
+  </Card>
+</CardGrid>
+
+## Why
+
+Opening a project with the wrong Godot version silently upgrades its files. Running Godot from a script means
+hard-coding an executable path. Sharing addons means copying folders around. `gdt` makes the version, the addons and
+the test command part of the project, so a fresh clone works the same on every machine.
+
+## A taste
+
+```bash
+gdt install 4.7.2                      # download an official build and verify its checksum
+gdt pin 4.7                            # write the build into gdt.toml, in the current project
+gdt open                               # open the editor with the version the project asks for
+gdt run tools/foo.gd one two           # run a script headless with that version, from any folder
+gdt addon add github:bitwes/Gut@v9.7.1 --dev   # install an addon and lock it
+gdt test                               # run the project's tests headless (exit 10 if any fail)
+gdt sync                               # on a fresh clone: the engine, then the addons
+```
+
+`gdt --help` is the source of truth for what exists in the build you have; the [command
+reference](/reference/cli/) marks what is still *(planned)*.
+
+## Not affiliated
+
+This is an independent community project. It is not affiliated with, endorsed by or sponsored by the Godot Foundation
+or the Godot Engine project. “Godot” is a trademark of the Godot Foundation; it is used here under its [trademark
+policy](https://godot.foundation/policies-and-procedures/trademark-policy) to describe what the tool works with. This
+project does not use the Godot logo.
+
+Licensed under MIT or Apache-2.0, at your option. Developed with the help of AI coding assistants (Claude Code); every
+change is reviewed and merged by the maintainer.

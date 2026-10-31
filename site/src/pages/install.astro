@@ -1,0 +1,90 @@
+---
+// Shows the installers in the browser, read from the very files that are served at
+// /install.sh and /install.ps1 (site/public), so this page cannot drift from them.
+// GitHub Pages serves .sh with a generic type and browsers download it instead of
+// showing it; this page is the way to read it first.
+import { createHash } from 'node:crypto';
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+import sh from '../../public/install.sh?raw';
+import ps1 from '../../public/install.ps1?raw';
+
+const sha256 = (text: string) => createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex');
+const files = [
+  { name: 'install.sh', lang: 'sh', text: sh, hash: sha256(sh), lines: sh.split('\n').length },
+  { name: 'install.ps1', lang: 'powershell', text: ps1, hash: sha256(ps1), lines: ps1.split('\n').length },
+];
+const [shFile, ps1File] = files;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Read the installers',
+    description: 'The exact install.sh and install.ps1 served from this site, readable before you run them.',
+    editUrl: 'https://github.com/roxguel/godot-dev-tools/edit/main/site/public/install.sh',
+  }}
+>
+  <p>
+    The one-line installers run a script from this site. Read it first. Below are the exact files served at
+    <a href="/install.sh"><code>/install.sh</code></a> and <a href="/install.ps1"><code>/install.ps1</code></a>,
+    read from the repository when this site was built. (Opening those two URLs directly may download the file instead
+    of showing it, because GitHub Pages serves them with a generic content type.)
+  </p>
+
+  <Aside type="caution" title="Not published yet">
+    There is no release yet, so the installers have nothing to download. Until v0.1.0 is out, <a
+      href="/installation/from-source/">build from source</a
+    >.
+  </Aside>
+
+  <Tabs syncKey="os">
+    <TabItem label="Linux and macOS">
+      <p>Run it:</p>
+      <Code code="curl -fsSL https://gdt.roxguel.dev/install.sh | sh" lang="sh" />
+      <p>Or download, read and then run:</p>
+      <Code
+        code={'curl -fsSL https://gdt.roxguel.dev/install.sh -o install.sh\nless install.sh\nsh install.sh'}
+        lang="sh"
+      />
+      <p>
+        SHA-256 of this file: <code>{shFile.hash}</code>. Compare with <code>curl -fsSL https://gdt.roxguel.dev/install.sh
+        | sha256sum</code>.
+      </p>
+      <Code code={shFile.text} lang={shFile.lang} title="install.sh" />
+    </TabItem>
+    <TabItem label="Windows (PowerShell)">
+      <p>Run it:</p>
+      <Code code="irm https://gdt.roxguel.dev/install.ps1 | iex" lang="powershell" />
+      <p>Or download, read and then run:</p>
+      <Code
+        code={'irm https://gdt.roxguel.dev/install.ps1 -OutFile install.ps1\nnotepad install.ps1\n& ([scriptblock]::Create((Get-Content .\\install.ps1 -Raw)))'}
+        lang="powershell"
+      />
+      <p>
+        SHA-256 of this file: <code>{ps1File.hash}</code>. After saving it, compare with
+        <code>Get-FileHash install.ps1 -Algorithm SHA256</code>.
+      </p>
+      <Code code={ps1File.text} lang={ps1File.lang} title="install.ps1" />
+    </TabItem>
+  </Tabs>
+
+  <h2 id="what-they-do">What they do</h2>
+  <ul>
+    <li>Pick the archive for your system and architecture, and the release you asked for (default: the latest).</li>
+    <li>
+      Download it and the <code>SHA256SUMS</code> file of the same release from GitHub over HTTPS, and stop if the
+      checksum does not match.
+    </li>
+    <li>
+      With <code>--verify-attestation</code> (<code>GDT_VERIFY_ATTESTATION=1</code> on Windows), also run
+      <code>gh attestation verify</code> on the archive.
+    </li>
+    <li>Copy <code>gdt</code> into one folder. Nothing else is changed: not <code>PATH</code>, not your profile.</li>
+  </ul>
+
+  <h2 id="verify">Verify without the installer</h2>
+  <p>
+    You can skip the installers and check a release by hand, with the checksum file and
+    <code>gh attestation verify</code>: <a href="/installation/verify/">Verify a download</a>.
+  </p>
+</StarlightPage>

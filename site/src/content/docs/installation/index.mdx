@@ -1,0 +1,86 @@
+---
+title: Install gdt
+description: One-line installers for Windows, Linux and macOS, and what they do.
+sidebar:
+  label: Installers
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Aside type="caution" title="Not published yet">
+  There is no release yet, so the installers have nothing to download and say so. Until v0.1.0 is out, [build from
+  source](/installation/from-source/).
+</Aside>
+
+The installers download the release archive for your machine from [GitHub
+Releases](https://github.com/roxguel/godot-dev-tools/releases), check it against the `SHA256SUMS` file of the same
+release, and put the `gdt` executable in one folder. They do not change `PATH`, shell profiles or anything else.
+
+<Tabs syncKey="os">
+  <TabItem label="Linux and macOS">
+
+```sh
+curl -fsSL https://gdt.roxguel.dev/install.sh | sh
+```
+
+Options go after `sh -s --`:
+
+```sh
+curl -fsSL https://gdt.roxguel.dev/install.sh | sh -s -- --version 0.1.0 --dir "$HOME/bin"
+```
+
+| Option | Environment | Effect |
+|---|---|---|
+| `--version <v>` | `GDT_VERSION` | Install this version. Default: the latest release |
+| `--dir <path>` | `GDT_INSTALL_DIR` | Install into this folder. Default: `$HOME/.local/bin` |
+| `--verify-attestation` | | Also check the build provenance with `gh attestation verify` (needs the GitHub CLI, signed in) |
+
+  </TabItem>
+  <TabItem label="Windows (PowerShell)">
+
+```powershell
+irm https://gdt.roxguel.dev/install.ps1 | iex
+```
+
+Options through environment variables, set before that line:
+
+```powershell
+$env:GDT_VERSION = '0.1.0'
+$env:GDT_INSTALL_DIR = 'C:\tools\gdt'
+$env:GDT_VERIFY_ATTESTATION = '1'
+```
+
+Or as parameters:
+
+```powershell
+& ([scriptblock]::Create((irm https://gdt.roxguel.dev/install.ps1))) -Version 0.1.0 -InstallDir C:\tools\gdt
+```
+
+The default folder is `%LOCALAPPDATA%\Programs\gdt`. The Windows binaries are not code-signed, so SmartScreen can warn
+the first time you run one.
+
+  </TabItem>
+</Tabs>
+
+Piping a script into a shell runs code you have not read. [Read the installers](/install/) first: that page shows the
+exact files, with their SHA-256, in the browser. To skip the installer altogether, [verify a download by
+hand](/installation/verify/).
+
+## After installing
+
+If the installer says the folder is not on your `PATH`, add it. Then:
+
+```sh
+gdt --version
+gdt install latest      # your first Godot build; it becomes the default
+```
+
+To make a plain `godot` follow `gdt`, see [the shim](/guides/shim/).
+
+## Platforms
+
+| System | Build |
+|---|---|
+| Windows | x86_64, arm64 |
+| Linux | x86_64, arm64 (static, any distribution) |
+| macOS | arm64 (Apple silicon), x86_64 |

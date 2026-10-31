@@ -1,0 +1,181 @@
+// Builds the generated part of the site from the repository's own documents.
+//
+// docs/ (and a few files in the repository root) are the only copy of the specs,
+// the ADRs, the roadmap, the changelog and the security policy. This script turns
+// them into Starlight pages under src/content/docs/, which are git-ignored:
+//
+//   - the title comes from the first "# " line, which is then dropped (Starlight
+//     renders the title itself);
+//   - "Edit this page" points at the real source file in the repository;
+//   - relative links are rewritten: a link to another synced document becomes a
+//     site route, anything else in the repository becomes a GitHub URL.
+//
+// It runs before every `astro dev` and `astro build`, and fails on a link it cannot
+// resolve.
+
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, posix, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const siteRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const repoRoot = resolve(siteRoot, '..');
+const outRoot = join(siteRoot, 'src', 'content', 'docs');
+const REPO = 'https://github.com/roxguel/godot-dev-tools';
+
+// Destination folders and files that this script owns. They are deleted and
+// recreated on every run, and listed in site/.gitignore.
+const generated = ['reference', 'specs', 'adr', 'project', 'security.md', 'changelog.md', 'contributing.md'];
+
+/** Order of the spec pages in the sidebar. */
+const specOrder = ['version-management', 'addons', 'testing', 'authentication'];
+const projectOrder = ['vision', 'roadmap', 'open-questions'];
+
+/** @type {{ source: string, route: string, order?: number }[]} */
+const pages = [];
+
+const list = (dir) => readdirSync(join(repoRoot, dir)).filter((f) => f.endsWith('.md')).sort();
+
+pages.push({ source: 'docs/specs/cli.md', route: 'reference/cli' });
+for (const file of list('docs/specs')) {
+  const name = file.replace(/\.md$/, '');
+  if (name === 'cli') continue;
+  const order = specOrder.indexOf(name);
+  pages.push({ source: `docs/specs/${file}`, route: `specs/${name}`, order: order === -1 ? 100 : order + 1 });
+}
+for (const file of list('docs/adr')) {
+  pages.push({ source: `docs/adr/${file}`, route: `adr/${file.replace(/\.md$/, '')}` });
+}
+for (const name of projectOrder) {
+  pages.push({ source: `docs/${name}.md`, route: `project/${name}`, order: projectOrder.indexOf(name) + 1 });
+}
+pages.push(
+  { source: 'CONTRIBUTING.md', route: 'project/contributing', order: 10 },
+  { source: 'SECURITY.md', route: 'security' },
+  { source: 'CHANGELOG.md', route: 'changelog' },
+);
+
+// Where a repository path lands on the site, for links between documents.
+const routeOf = new Map(pages.map((p) => [p.source, `/${p.route}/`]));
+routeOf.set('docs/README.md', '/specs/');
+routeOf.set('docs/adr', '/adr/');
+routeOf.set('README.md', '/');
+
+function githubUrl(repoPath) {
+  const full = join(repoRoot, repoPath);
+  if (!existsSync(full)) throw new Error(`link to a file that does not exist: ${repoPath}`);
+  return `${REPO}/${statSync(full).isDirectory() ? 'tree' : 'blob'}/main/${repoPath}`;
+}
+
+/** Rewrites one link target found in `source`; leaves absolute URLs and bare anchors alone. */
+function rewriteTarget(target, source) {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#') || target.startsWith('/')) return target;
+  const [path, anchor] = target.split('#');
+  const repoPath = posix.normalize(posix.join(posix.dirname(source), path)).replace(/\/$/, '');
+  const route = routeOf.get(repoPath);
+  const hash = anchor ? `#${anchor}` : '';
+  if (route) return route + hash;
+  return githubUrl(repoPath) + hash;
+}
+
+/** Applies `fn` to the text outside fenced code blocks. */
+function outsideFences(text, fn) {
+  const lines = text.split('\n');
+  let fence = null;
+  return lines
+    .map((line) => {
+      const m = /^\s*(`{3,}|~{3,})/.exec(line);
+      if (m) {
+        if (!fence) fence = m[1][0];
+        else if (m[1][0] === fence) fence = null;
+        return line;
+      }
+      return fence ? line : fn(line);
+    })
+    .join('\n');
+}
+
+function convert({ source, route, order }) {
+  const raw = readFileSync(join(repoRoot, source), 'utf8').replace(/\r\n/g, '\n');
+  const lines = raw.split('\n');
+  const h1 = lines.findIndex((l) => /^# /.test(l));
+  if (h1 === -1) throw new Error(`${source} has no "# " title`);
+  const title = lines[h1].slice(2).trim();
+  const body = lines.slice(h1 + 1).join('\n').replace(/^\n+/, '');
+
+  const text = outsideFences(body, (line) =>
+    line
+      // [text](target) and [text](target "title")
+      .replace(/\]\(([^)\s]+)((?:\s+"[^"]*")?)\)/g, (_, t, rest) => `](${rewriteTarget(t, source)}${rest})`)
+      // [label]: target
+      .replace(/^(\[[^\]]+\]:\s+)(\S+)/, (_, head, t) => `${head}${rewriteTarget(t, source)}`),
+  );
+
+  const front = [
+    '---',
+    `# Generated by scripts/sync-docs.mjs from ${source}. Do not edit; edit the source.`,
+    `title: ${JSON.stringify(title)}`,
+    `editUrl: ${REPO}/edit/main/${source}`,
+  ];
+  if (order !== undefined) front.push('sidebar:', `  order: ${order}`);
+  front.push('---', '');
+  return { title, text: front.join('\n') + text.replace(/\n*$/, '\n') };
+}
+
+function write(route, content) {
+  const file = join(outRoot, `${route}.md`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, content);
+}
+
+/** The status line ("Status: Accepted (...)") of a document, for the index pages. */
+function statusOf(source) {
+  const m = /^Status:\s*(.+)$/m.exec(readFileSync(join(repoRoot, source), 'utf8'));
+  return m ? m[1].split(/[.,;:(]/)[0].trim() : '';
+}
+
+for (const name of generated) rmSync(join(outRoot, name), { recursive: true, force: true });
+
+const titles = new Map();
+for (const page of pages) {
+  const { title, text } = convert(page);
+  titles.set(page.source, title);
+  write(page.route, text);
+}
+
+// Index pages are derived from the documents, so a new spec or ADR shows up by itself.
+function indexPage(dir, title, intro, prefix) {
+  const rows = pages
+    .filter((p) => p.route.startsWith(`${dir}/`))
+    .map((p) => `| [${titles.get(p.source)}](/${p.route}/) | ${statusOf(p.source)} |`);
+  const body = [
+    '---',
+    `title: ${title}`,
+    `editUrl: ${REPO}/tree/main/docs/${prefix}`,
+    'sidebar:',
+    '  order: 0',
+    '---',
+    '',
+    intro,
+    '',
+    '| Document | Status |',
+    '|---|---|',
+    ...rows,
+    '',
+  ].join('\n');
+  write(`${dir}/index`, body);
+}
+
+indexPage(
+  'specs',
+  'Specifications',
+  'What each area does, in detail. Every spec declares its status at the top; anything not built yet is marked *(planned)*. The command surface is in the [command reference](/reference/cli/).',
+  'specs',
+);
+indexPage(
+  'adr',
+  'Architecture decisions',
+  'The decisions that shape the project, one record each (ADRs). A record says what was decided, why, and what it replaced.',
+  'adr',
+);
+
+console.log(`sync-docs: ${pages.length} pages written to ${relative(repoRoot, outRoot)}`);

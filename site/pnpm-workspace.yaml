@@ -1,0 +1,12 @@
+# pnpm settings for the documentation site (it has no workspace packages).
+
+# Do not install a version published less than 3 days ago (minutes). Strict:
+# if nothing old enough satisfies a range, the install fails instead of falling back.
+minimumReleaseAge: 4320
+
+# Dependency install scripts do not run unless listed here. None is needed today:
+# sharp 0.35 has no install-time script (its native code comes as prebuilt @img/sharp-*
+# optional packages) and Astro 7 builds with Rolldown, so there is no esbuild at all.
+# A package that starts to need one makes `pnpm install` report it; review it before
+# allowing it.
+allowBuilds: {}

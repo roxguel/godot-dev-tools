@@ -4,7 +4,7 @@ Guidance for Claude Code and contributors.
 
 ## What this is
 
-Godot Development Tools: a cross-platform Rust CLI (`gdt`) that manages Godot versions, addons and tests. Documentation lives in [`docs/`](docs/README.md); start with the vision, the roadmap and the ADRs. First consumer project: Project Cozy (`../project-cozy`).
+Godot Development Tools: a cross-platform Rust CLI (`gdt`) that manages Godot versions, addons and tests. Documentation lives in [`docs/`](docs/README.md); start with the vision, the roadmap and the ADRs. The documentation site (Astro Starlight, pnpm) is in `site/` and reuses `docs/` instead of copying it; the installers are served from `site/public/` and their URLs are a public contract (see `site/README.md`). First consumer project: Project Cozy (`../project-cozy`).
 
 ## Conventions
 
