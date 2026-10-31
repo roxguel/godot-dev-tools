@@ -222,6 +222,16 @@ fn flavor_name(flavor: Flavor) -> &'static str {
     }
 }
 
+/// The channel as `--channel` and the aliases spell it.
+fn channel_name(kind: Option<ChannelKind>) -> &'static str {
+    match kind {
+        None => "stable",
+        Some(ChannelKind::Rc) => "rc",
+        Some(ChannelKind::Beta) => "beta",
+        Some(ChannelKind::Dev) => "dev",
+    }
+}
+
 /// The newest release of each channel, named by the alias that picks it.
 fn alias_tags(releases: &[Release]) -> HashMap<Version, Vec<&'static str>> {
     let newest = |kind: Option<ChannelKind>| {
@@ -438,7 +448,8 @@ fn list_remote(
                 json!({
                     "version": r.version.to_string(),
                     "tag": r.tag,
-                    "channel": r.version.channel.to_string(),
+                    "channel": channel_name(r.version.channel.kind()),
+                    "prerelease": r.version.channel.kind().map(|_| r.version.channel.to_string()),
                     "source": r.source.repo(),
                     "aliases": aliases.get(&r.version).cloned().unwrap_or_default(),
                     "installed": names,

@@ -19,9 +19,9 @@ use anyhow::Result;
 use clap::{ArgAction, Args, CommandFactory, Parser, Subcommand};
 use godot_dev_tools::{
     AddonError, Arch, Build, Config, Dirs, EngineError, EngineFeatures, Flavor, HttpClient,
-    HttpError, InstallRequest, Platform, Progress, ReleaseError, ResolveError, ResponseCache,
-    Source, TestError, UreqClient, Version, VersionError, VersionSpec, fetch_releases,
-    find_project_file, install_build,
+    HttpError, InstallRequest, Platform, Progress, ProjectError, ReleaseError, ResolveError,
+    ResponseCache, Source, TestError, UreqClient, Version, VersionError, VersionSpec,
+    fetch_releases, find_project_file, install_build,
 };
 use serde_json::json;
 
@@ -388,7 +388,16 @@ fn release_cache(dirs: &Dirs) -> ResponseCache {
 
 /// The version a project asks for in its `project.godot`, as a spec.
 fn project_spec(ctx: &Ctx) -> Result<VersionSpec> {
-    let file = find_project_file(Path::new("."))?;
+    let file = match find_project_file(Path::new(".")) {
+        Ok(file) => file,
+        Err(error @ ProjectError::NotFound { .. }) => {
+            return Err(UsageError(format!(
+                "{error}; say which version to install, for example `gdt install latest`"
+            ))
+            .into());
+        }
+        Err(error) => return Err(error.into()),
+    };
     let features = EngineFeatures::from_file(&file)?;
     let Some((major, minor)) = features.engine else {
         return Err(UsageError(format!(
