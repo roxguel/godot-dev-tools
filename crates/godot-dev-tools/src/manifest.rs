@@ -40,6 +40,7 @@ pub enum ManifestError {
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct Raw {
     godot: Option<RawGodot>,
     /// `[addons]`: the key `git` and one sub-table per addon.
@@ -52,6 +53,7 @@ struct Raw {
 
 /// The `[test]` table: how `gdt test` runs the project's tests.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TestConfig {
     /// `gut`, `gdunit4` or `script`; found from the installed addons when absent.
     pub runner: Option<String>,
@@ -64,6 +66,7 @@ pub struct TestConfig {
 
 /// What an `[addons.<name>]` table says: where the addon comes from.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AddonEntry {
     /// `owner/repo` on GitHub.
     pub github: Option<String>,
@@ -96,6 +99,7 @@ pub enum GitMode {
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct RawGodot {
     version: Option<String>,
 }
@@ -304,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_tables_are_allowed() {
+    fn known_tables_are_read() {
         let dir = scratch("manifest-unknown");
         let path = dir.join(MANIFEST_FILE);
         fs::write(
@@ -592,6 +596,53 @@ subdir = \"/etc\"
             fs::write(&path, text).unwrap();
             let err = Manifest::read(&path).unwrap_err();
             assert!(matches!(err, ManifestError::Invalid { .. }), "{text:?}");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_key_gdt_does_not_know_is_an_error_naming_it() {
+        let dir = scratch("manifest-typos");
+        let path = dir.join(MANIFEST_FILE);
+        for (text, named) in [
+            (
+                "[addons.gut]
+github = \"o/r\"
+git = \"track\"
+",
+                "git",
+            ),
+            (
+                "[addons.gut]
+github = \"o/r\"
+versoin = \"1\"
+",
+                "versoin",
+            ),
+            (
+                "[addon.gut]
+github = \"o/r\"
+",
+                "addon",
+            ),
+            (
+                "[godot]
+versoin = \"4.7\"
+",
+                "versoin",
+            ),
+            (
+                "[test]
+runner = \"gut\"
+path = [\"t\"]
+",
+                "path",
+            ),
+        ] {
+            fs::write(&path, text).unwrap();
+            let err = Manifest::read(&path).unwrap_err().to_string();
+            assert!(err.contains(named), "{text:?} -> {err}");
+            assert!(err.contains(MANIFEST_FILE), "{err}");
         }
         let _ = fs::remove_dir_all(dir);
     }
