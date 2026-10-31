@@ -283,6 +283,9 @@ fn extract_with_limits(
         let relative = entry.enclosed_name().ok_or_else(|| {
             EngineError::UnsafeArchive(String::from_utf8_lossy(entry.name_raw()).into_owned())
         })?;
+        if cfg!(windows) {
+            reject_windows_names(&relative)?;
+        }
         let out = dest.join(&relative);
         let context = format!("could not extract {}", relative.display());
 
@@ -332,6 +335,22 @@ fn extract_with_limits(
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&out, fs::Permissions::from_mode(mode & 0o777))
                 .map_err(io_err(context))?;
+        }
+    }
+    Ok(())
+}
+
+/// Fails if a part of `relative` is a name Windows would not create as written
+/// (a device such as `nul`, a hidden `:stream`, a trailing dot).
+fn reject_windows_names(relative: &Path) -> Result<(), EngineError> {
+    for component in relative.components() {
+        if let std::path::Component::Normal(name) = component {
+            if let Some(why) = crate::names::windows_file_name_problem(&name.to_string_lossy()) {
+                return Err(EngineError::UnsafeArchive(format!(
+                    "{}: {why}",
+                    relative.display()
+                )));
+            }
         }
     }
     Ok(())
@@ -745,6 +764,35 @@ mod tests {
         extract_with_limits(&archive, &out, Links::Reject, limits(2, (1 << 20) + 1)).unwrap();
         assert_eq!(fs::read(out.join("b.bin")).unwrap(), b"x");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn names_windows_would_not_create_as_written_are_refused_there() {
+        for bad in ["addon/nul.txt", "addon/data.txt:hidden", "addon/dots."] {
+            assert!(
+                matches!(
+                    reject_windows_names(Path::new(bad)),
+                    Err(EngineError::UnsafeArchive(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert!(reject_windows_names(Path::new("addon/plugin.cfg")).is_ok());
+
+        // On Windows the extractor applies it, and nothing is written.
+        if cfg!(windows) {
+            let dir = scratch("extract-win-names");
+            let archive = dir.join("a.zip");
+            fs::write(&archive, zip_bytes(&[("addon/aux.txt", b"x")])).unwrap();
+            let out = dir.join("out");
+            let result = extract_zip(&archive, &out, Links::Reject);
+            assert!(
+                matches!(result, Err(EngineError::UnsafeArchive(_))),
+                "{result:?}"
+            );
+            assert!(!out.join("addon").exists());
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 
     #[test]

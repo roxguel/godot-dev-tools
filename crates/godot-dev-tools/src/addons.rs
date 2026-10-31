@@ -125,6 +125,9 @@ impl GithubSource {
             }
             _ => path,
         };
+        if let Some(git_ref) = &git_ref {
+            check_git_ref(git_ref)?;
+        }
         let (owner, repo) = path.split_once('/').ok_or_else(bad)?;
         let valid = |s: &str| {
             !s.is_empty()
@@ -142,6 +145,27 @@ impl GithubSource {
     }
 }
 
+/// Checks that `git_ref` can go into the path of an API URL as it is: letters,
+/// digits and `. _ - + /`, with no `..` and no empty part. That covers the tags
+/// and branches people use, and leaves out what would change the URL (`?`, `#`,
+/// `%`, spaces) or climb out of it (`..`).
+pub fn check_git_ref(git_ref: &str) -> Result<(), AddonError> {
+    let plain = !git_ref.is_empty()
+        && git_ref
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+' | '/'))
+        && git_ref
+            .split('/')
+            .all(|part| !part.is_empty() && part != "..");
+    if plain && !git_ref.contains("..") {
+        Ok(())
+    } else {
+        Err(AddonError::BadSource(format!(
+            "`{git_ref}` cannot be used as a tag, branch or commit: it may only have letters, digits and `. _ - + /`, with no `..`"
+        )))
+    }
+}
+
 /// The full commit that `git_ref` (a tag, branch or commit; the default branch
 /// if `None`) points to.
 pub fn resolve_commit(
@@ -149,6 +173,9 @@ pub fn resolve_commit(
     source: &GithubSource,
     git_ref: Option<&str>,
 ) -> Result<String, AddonError> {
+    if let Some(git_ref) = git_ref {
+        check_git_ref(git_ref)?;
+    }
     let reference = git_ref.unwrap_or("HEAD");
     let url = format!(
         "https://api.github.com/repos/{}/{}/commits/{reference}",
@@ -663,6 +690,45 @@ mod tests {
             p("github:o/r@feature/x").git_ref.as_deref(),
             Some("feature/x")
         );
+    }
+
+    #[test]
+    fn refs_that_would_change_the_api_url_are_refused() {
+        for ok in [
+            "main",
+            "v9.4.0",
+            "feature/x",
+            "release-1.2+build_3",
+            "0123456789abcdef0123456789abcdef01234567",
+        ] {
+            assert!(check_git_ref(ok).is_ok(), "{ok:?}");
+        }
+        for bad in [
+            "",
+            "x?per_page=1",
+            "a#b",
+            "a b",
+            "x%2e%2e",
+            "../x",
+            "a/../b",
+            "a..b",
+            "/x",
+            "x/",
+            "a//b",
+            "a\\b",
+            "x\ny",
+        ] {
+            assert!(
+                matches!(check_git_ref(bad), Err(AddonError::BadSource(_))),
+                "{bad:?}"
+            );
+        }
+        // Refused when parsing the source, and again where the URL is built.
+        assert!(GithubSource::parse("github:o/r@x?y=1").is_err());
+        let fake = Fake::new(&[]);
+        let src = source();
+        assert!(resolve_commit(&fake, &src, Some("a?b")).is_err());
+        assert!(fake.urls.borrow().is_empty(), "no request was made");
     }
 
     #[test]

@@ -51,6 +51,8 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - `gdt run` on Linux and macOS replaces itself with Godot, so signals sent to it, the terminal and the exit code are Godot's own. `gdt test` reports a Godot that a signal ended as `128 + N`, as a shell does.
 - On Windows, gdt starts `powershell.exe` and `explorer.exe` by their full path under the Windows folder, not by name, so a copy in the current folder or next to gdt is not run in their place.
 - `gdt test` stops if it cannot delete the previous JUnit report, instead of reading an old result as the new one.
+- A tag, branch or commit for an addon (`@ref`, `ref =`) may only have letters, digits and `. _ - + /` (no `..`), so it cannot change the GitHub API URL it is put into.
+- On Windows, archive entries whose names Windows would not create as written (a device such as `nul` or `aux.txt`, a hidden `:stream`, a trailing dot or space) are refused.
 
 ### Known limitations
 
