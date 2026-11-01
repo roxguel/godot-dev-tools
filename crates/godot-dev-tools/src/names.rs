@@ -47,6 +47,22 @@ pub fn addon_name_problem(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Why a file or folder name inside an archive is dangerous to create on Windows,
+/// or `None`. Windows treats `name:stream` as a hidden stream of another file,
+/// drops a trailing dot or space, and sends `con`, `nul`, `com1`... (with any
+/// extension) to a device instead of a file.
+pub fn windows_file_name_problem(component: &str) -> Option<&'static str> {
+    if component.contains(':') {
+        Some("the `:` names a hidden stream of a file on Windows")
+    } else if component.ends_with('.') || component.ends_with(' ') {
+        Some("Windows drops a trailing dot or space from a name")
+    } else if is_reserved(component) {
+        Some("it is a reserved device name on Windows")
+    } else {
+        None
+    }
+}
+
 /// The folder inside an archive that `subdir` names, in `/` form (`.` for the
 /// whole archive), or why it cannot be used. Accepts relative paths of plain
 /// folder names separated by `/` or `\`, with an optional leading `./` and
@@ -139,6 +155,32 @@ mod tests {
             long.as_str(),
         ] {
             assert!(addon_name_problem(bad).is_some(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn names_that_are_not_files_on_windows_are_found() {
+        for ok in [
+            "plugin.cfg",
+            "gut.gd",
+            ".gitignore",
+            "a b.txt",
+            "console.gd",
+            "lpt10",
+        ] {
+            assert_eq!(windows_file_name_problem(ok), None, "{ok:?}");
+        }
+        for bad in [
+            "a.txt:hidden",
+            "c:",
+            "nul",
+            "NUL.txt",
+            "Aux.tar.gz",
+            "com1",
+            "x.",
+            "x ",
+        ] {
+            assert!(windows_file_name_problem(bad).is_some(), "{bad:?}");
         }
     }
 
