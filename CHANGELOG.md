@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-01
+
+The `gdt` program is the same as 0.1.0 except for one error message. What changes is around it: what the archives and the crates carry, and how a release is published.
+
 ### Added
 
 - Every release archive includes `THIRD-PARTY-NOTICES.txt`, with the copyright notice and license text of each library gdt is built with.
@@ -79,5 +83,6 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - The Windows binaries are not code-signed, so SmartScreen can warn on the first run.
 - Not available yet: addon sources by URL or local path, signing in to the Asset Store (paid assets), `gdt init`, `doctor`, `config`, `cache`, `completions`, `self-update` and `gdt upgrade`. See [the roadmap](docs/roadmap.md).
 
-[Unreleased]: https://github.com/roxguel/godot-dev-tools/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/roxguel/godot-dev-tools/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/roxguel/godot-dev-tools/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/roxguel/godot-dev-tools/releases/tag/v0.1.0
