@@ -45,7 +45,8 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - `gdt addon update` no longer replaces an existing addon folder that has no lock entry unless `--force` is given.
 - `--path` is not looked for after a bare `--` in `gdt run` and the `godot` shim, where the arguments belong to the script, so the project's version is chosen from the folder Godot really uses.
 - `-v` and `-vv` mask `Authorization` headers, GitHub tokens and the value of `GH_TOKEN`/`GITHUB_TOKEN` before printing.
-- Downloads are verified against published checksums before use; a cached release list that cannot be read is discarded.
+- Downloads are verified against published checksums before use; a cached release list that cannot be read is discarded. A cached addon archive is checked again on every use when a checksum is published, and cache file names include a digest of the URL so two sources cannot share one.
+- Downloads are HTTPS only (redirects included), and a store's `download_url` over plain HTTP is refused. A download is capped at 1 GiB, and an archive that unpacks to more than 8 GiB or 200,000 entries is refused, so a hostile addon cannot fill the disk.
 
 ### Known limitations
 
