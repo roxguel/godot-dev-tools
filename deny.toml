@@ -3,6 +3,8 @@ all-features = true
 
 [advisories]
 version = 2
+# A yanked crate was pulled by its author, usually for a bug or a security problem.
+yanked = "deny"
 
 [licenses]
 version = 2
