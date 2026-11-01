@@ -1,0 +1,26 @@
+THIRD-PARTY NOTICES
+
+gdt is licensed under MIT OR Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE). It is built
+with the open-source libraries listed below, each under its own license. The licenses
+are reproduced in full after the summary, as they ask.
+
+Summary (license: number of libraries)
+======================================
+{{#each overview}}
+{{{name}}} ({{id}}): {{count}}
+{{/each}}
+
+Licenses
+========
+{{#each licenses}}
+
+--------------------------------------------------------------------------------
+{{{name}}} ({{id}})
+
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+{{{text}}}
+{{/each}}
