@@ -1,0 +1,37 @@
+{
+    "version": "0.1.0",
+    "description": "Godot Development Tools: version manager, addon manager and test runner for Godot.",
+    "homepage": "https://gdt.roxguel.dev",
+    "license": "MIT|Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/roxguel/godot-dev-tools/releases/download/v0.1.0/gdt-v0.1.0-x86_64-pc-windows-msvc.zip",
+            "hash": "fe6332ffe0cec6d95819c9d2d07b9955cc8a0c8fcfec76ce2df0ea1611ea4d39",
+            "extract_dir": "gdt-v0.1.0-x86_64-pc-windows-msvc"
+        },
+        "arm64": {
+            "url": "https://github.com/roxguel/godot-dev-tools/releases/download/v0.1.0/gdt-v0.1.0-aarch64-pc-windows-msvc.zip",
+            "hash": "90e14bda6f3b5df447f010a341ea8912aa39d830e284315b33661f36c12a8457",
+            "extract_dir": "gdt-v0.1.0-aarch64-pc-windows-msvc"
+        }
+    },
+    "bin": "gdt.exe",
+    "checkver": {
+        "github": "https://github.com/roxguel/godot-dev-tools"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/roxguel/godot-dev-tools/releases/download/v$version/gdt-v$version-x86_64-pc-windows-msvc.zip",
+                "extract_dir": "gdt-v$version-x86_64-pc-windows-msvc"
+            },
+            "arm64": {
+                "url": "https://github.com/roxguel/godot-dev-tools/releases/download/v$version/gdt-v$version-aarch64-pc-windows-msvc.zip",
+                "extract_dir": "gdt-v$version-aarch64-pc-windows-msvc"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/roxguel/godot-dev-tools/releases/download/v$version/SHA256SUMS"
+        }
+    }
+}
