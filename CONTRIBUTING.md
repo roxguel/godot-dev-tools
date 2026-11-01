@@ -5,9 +5,13 @@ Thanks for your interest. The project is young: the core works, and the most use
 ## Workflow
 
 - Open an issue before a large change so the approach can be agreed first.
-- Work on a branch and open a pull request against `main`.
-- Commits follow conventional commits with a scope: `feat(versions): ...`, `fix(addons): ...`, `docs(adr): ...`.
+- Fork the repository (or, for the maintainer, work on a branch) and open a pull request against `main`. `main` is protected: nothing is pushed to it directly, and a pull request can only be merged once the checks pass.
+- Name the branch for the kind of change: `feat/...`, `fix/...`, `docs/...`, `chore/...`, `ci/...`.
+- Commits follow conventional commits with a scope: `feat(versions): ...`, `fix(addons): ...`, `docs(adr): ...`. One pull request is one change that can be reviewed on its own.
 - Decisions that shape the architecture are recorded as ADRs in `docs/adr/`; behavior changes update the matching spec.
+- A change that users can notice (behavior, output, files, distribution) adds a line to the `[Unreleased]` section of [`CHANGELOG.md`](CHANGELOG.md), in the style of the ones there.
+- The maintainer reviews and merges every pull request. A pull request from a fork runs CI only after the maintainer approves the run, and never receives secrets.
+- Report a security problem privately, as [SECURITY.md](SECURITY.md) says, not in a pull request or an issue.
 
 ## Before sending a pull request
 
@@ -17,7 +21,11 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 ```
 
-Code must compile and pass tests on Windows, Linux and macOS; CI checks all three. Keep OS-specific code in a platform module, and keep filesystem and network access behind traits so logic can be tested without them. A name or path that comes from outside (the command line, `gdt.toml`, `gdt.lock`, an archive) must go through `crates/godot-dev-tools/src/names.rs` before it is used to build a path, and a change that touches such code needs a regression test with a hostile input.
+CI runs these as the checks `Lint`, `Test` (Ubuntu, Windows and macOS), `Installers` (ShellCheck and a parse check of the install scripts) and `Dependencies` (`cargo deny`: advisories, licenses, sources), plus the site build when the site or the documents change. Code must compile and pass tests on Windows, Linux and macOS; CI checks all three. Keep OS-specific code in a platform module, and keep filesystem and network access behind traits so logic can be tested without them. A name or path that comes from outside (the command line, `gdt.toml`, `gdt.lock`, an archive) must go through `crates/godot-dev-tools/src/names.rs` before it is used to build a path, and a change that touches such code needs a regression test with a hostile input.
+
+## Releases
+
+Only the maintainer releases. The branch model, the steps, the checks after a release and what to do when a job fails are in [docs/releasing.md](docs/releasing.md); the settings behind them (branch and tag rules, the `release` environment, crates.io and the package managers) are in [docs/maintainers.md](docs/maintainers.md).
 
 ## The documentation site
 

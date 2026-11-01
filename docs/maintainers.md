@@ -1,0 +1,66 @@
+# Maintainers
+
+Status: Draft. Updated 2026-11-01.
+
+The settings outside the code that the project depends on: what is configured, why, and where. It lists names and places, never secret values. How a version is released is in [releasing.md](releasing.md).
+
+## Roles
+
+One maintainer (`roxguel`) merges every pull request and publishes every release. Nobody else has write access to the repository. GitHub cannot restrict who merges on a personal repository, so this rests on there being one collaborator with write access: do not grant write access without deciding it on purpose.
+
+## The repository `roxguel/godot-dev-tools`
+
+| Setting | Value | Why |
+|---|---|---|
+| Branch protection on `main` | Pull request required, no approvals required, administrators included, no force-push, no deletion, conversations resolved | One maintainer cannot approve their own pull request. Raise the approvals when there are more maintainers |
+| Required checks | `Lint`, `Test (ubuntu-latest)`, `Test (windows-latest)`, `Test (macos-latest)`, `Installers`, `Dependencies` | The names must match the CI job names exactly; renaming a job breaks the rule |
+| "Require branches to be up to date" | Off | It is a correctness check, not a security one, and forces updating every open pull request after each merge. Reconsider with more contributors; CI also runs on every push to `main` |
+| Tag ruleset "Release ruleset" | Tags `v*`: creation, update, deletion and non-fast-forward are restricted; the repository admin role bypasses it | A release tag cannot be created, moved or deleted by anyone else |
+| Delete branch on merge | On | Merged branches do not pile up |
+| Actions: default `GITHUB_TOKEN` | Read-only; each job asks for more where it needs it | |
+| Actions: workflows from outside contributors | Need approval for all of them | A fork's pull request can run code only after the maintainer reads it |
+| Dependabot | Cargo, GitHub Actions and the site's npm packages, weekly | Updates arrive as reviewable pull requests |
+| Weekly advisories check | `.github/workflows/advisories.yml`: `cargo deny check advisories` and `pnpm audit` | New advisories appear while the project is quiet |
+
+Rules that keep the workflows safe, to hold in every change:
+
+- Workflows triggered by a fork's pull request get no secrets and do not deploy. Never use `pull_request_target` together with a checkout or run of the pull request's code.
+- Third-party actions are pinned to a full commit SHA, with the tag in a comment; Dependabot updates them.
+- Applications commit their lockfile and CI installs from it (`--locked`, `--frozen-lockfile`).
+- Anything downloaded and run is checked against a published checksum or signature.
+- The installers are served from `site/public/`; the site build fails if the build changes them, and CI runs ShellCheck and a parse check on them.
+
+### The environment `release`
+
+Settings → Environments → `release`:
+
+- Required reviewer: the maintainer. Every job that uses it waits for an approval.
+- Deployment tags: `v*` only.
+- Secret `PACKAGING_TOKEN`: a fine-grained personal access token limited to `roxguel/homebrew-tap` and `roxguel/scoop-bucket`, with Contents and Pull requests on read and write. It expires on purpose; when it does, the `packaging` job fails to clone. Create a new one (Settings → Developer settings → Personal access tokens → Fine-grained tokens) and replace the secret. Keep nothing else in this environment.
+
+## crates.io
+
+- Crates: [`gdt`](https://crates.io/crates/gdt) and [`godot-dev-tools`](https://crates.io/crates/godot-dev-tools), owned by the maintainer's account (which needs a verified email to publish).
+- Each crate has a trusted publisher: GitHub, owner `roxguel`, repository `godot-dev-tools`, workflow `release.yml`, environment `release`. The `crates` job exchanges its OIDC identity for a token of a few minutes; there is no long-lived token. A crate's first publish cannot use trusted publishing, which is why 0.1.0 was published by hand.
+- "Require trusted publishing for all new versions" is to be turned on, for both crates, after the first release that publishes through the workflow succeeds. Until then a manual publish with a token remains possible; after, it is not (turn the option off to publish by hand in an emergency).
+- A published version cannot be deleted, only yanked.
+
+## Package managers
+
+| Where | What | Who updates it |
+|---|---|---|
+| [`roxguel/homebrew-tap`](https://github.com/roxguel/homebrew-tap) | `Formula/gdt.rb` | The `packaging` job opens a pull request; the maintainer merges it. `main` is protected like this repository's |
+| [`roxguel/scoop-bucket`](https://github.com/roxguel/scoop-bucket) | `bucket/gdt.json` | Same |
+| `microsoft/winget-pkgs` | `manifests/r/Roxguel/Gdt/<version>/` | By hand with `wingetcreate`, from `packaging/render.mjs`. The Microsoft CLA is signed. Every version is a pull request there, checked by their bot and merged by their moderators |
+
+The manifests are generated by `packaging/render.mjs` (see [packaging/README.md](../packaging/README.md)); change the template there, not in the tap or the bucket. Both repositories are public by necessity: `brew tap` and `scoop bucket add` clone them without credentials. They are named for the owner, not for gdt, so they can hold other tools later.
+
+## The site
+
+`site/` is published to GitHub Pages at <https://gdt.roxguel.dev> by `.github/workflows/site.yml`, only from `main`. A pull request builds it and publishes nothing. It reuses `docs/`, the changelog and the security policy (see [CONTRIBUTING](../CONTRIBUTING.md)). Its pnpm settings refuse a package version younger than a few days, and the installers' URLs (`/install.sh`, `/install.ps1`) are a public contract.
+
+## Known gaps
+
+- The Windows binaries are not code-signed, so SmartScreen can warn the first time one runs.
+- Linux x86_64 and Windows are tried by hand; macOS and the arm64 builds are only compiled and unit-tested in CI.
+- THIRD-PARTY-NOTICES.txt is generated with `cargo-about`, built at a pinned version in the release workflow; when its version is raised, check the output once.
