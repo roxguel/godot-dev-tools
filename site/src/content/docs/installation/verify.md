@@ -40,12 +40,17 @@ You want `OK` for your archive (or two identical hashes). Anything else: do not 
 ## Build provenance
 
 ```sh
-gh attestation verify gdt-v0.1.0-x86_64-unknown-linux-musl.tar.gz --repo roxguel/godot-dev-tools
+gh attestation verify gdt-v0.1.0-x86_64-unknown-linux-musl.tar.gz --repo roxguel/godot-dev-tools \
+  --signer-workflow roxguel/godot-dev-tools/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.1.0 \
+  --deny-self-hosted-runners
 ```
 
-This asks GitHub for the attestation of that exact file and checks its signature. A pass means the archive is the
-output of this repository's release workflow; it does not replace reading the source. `gh` needs to be signed in
-(`gh auth login`).
+This asks GitHub for the attestation of that exact file and checks its signature. The extra flags make the check
+strict: the attestation must come from this repository's release workflow (`--signer-workflow`), for this very tag
+(`--source-ref`, so an older release cannot pass for a newer one) and from a GitHub-hosted runner. A pass means the
+archive is the output of that workflow; it does not replace reading the source. `gh` needs to be recent and signed in
+(`gh auth login`). The installers run the same command with `--verify-attestation` (`-VerifyAttestation` on Windows).
 
 A checksum fetched from the same place as the archive proves the download was not corrupted; the attestation is what
 ties the archive to the build.

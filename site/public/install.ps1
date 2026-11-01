@@ -13,7 +13,7 @@
 # It downloads the release archive for this machine from GitHub, checks it against the
 # SHA256SUMS file of the same release, and puts gdt.exe in one folder. It does not change
 # PATH or anything else. $env:GDT_BASE_URL replaces https://github.com/roxguel/godot-dev-tools
-# (for mirrors and tests).
+# (for mirrors and tests); with a mirror, trust the build provenance check, not the transport.
 
 function Install-Gdt {
     [CmdletBinding()]
@@ -32,6 +32,11 @@ function Install-Gdt {
     $slug = 'roxguel/godot-dev-tools'
 
     function Fail([string]$message) { throw "gdt installer: $message" }
+
+    # GDT_BASE_URL (mirrors and tests) lifts the transport rules of the default address.
+    if ($custom -and $repoUrl -notlike 'https://*') {
+        Write-Warning "gdt installer: $repoUrl is not an https:// address, so the download is not protected in transit. Only -VerifyAttestation says where the file was built."
+    }
 
     function Get-LatestTag {
         # Windows PowerShell 5.1 does not load this assembly by itself.
@@ -89,22 +94,53 @@ function Install-Gdt {
 
         if ($VerifyAttestation) {
             if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { Fail '-VerifyAttestation needs the GitHub CLI (gh)' }
-            & gh attestation verify (Join-Path $tmp $archive) --repo $slug *> $null
-            if ($LASTEXITCODE -ne 0) { Fail "the build provenance of $archive could not be verified; nothing was installed" }
+            # Not any attestation of the repository: the one that this repository's release
+            # workflow made, on a GitHub-hosted runner, for this very tag. Windows PowerShell 5.1
+            # turns what a program writes to stderr into an error while 'Stop' is set, so the
+            # call runs under 'Continue' and the exit code decides.
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $null = & gh attestation verify (Join-Path $tmp $archive) --repo $slug `
+                    --signer-workflow "$slug/.github/workflows/release.yml" `
+                    --source-ref "refs/tags/$tag" `
+                    --deny-self-hosted-runners 2>&1
+                $code = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $previous }
+            if ($code -ne 0) { Fail "the build provenance of $archive could not be verified (it needs a recent GitHub CLI, signed in); nothing was installed" }
             Write-Host 'Build provenance ok'
+        } else {
+            Write-Host '(The checksum shows the download is intact. -VerifyAttestation also shows where it was built.)'
         }
 
-        $unpacked = Join-Path $tmp 'unpacked'
-        Expand-Archive -LiteralPath (Join-Path $tmp $archive) -DestinationPath $unpacked
-        $exe = Join-Path $unpacked "$name\gdt.exe"
-        if (-not (Test-Path -LiteralPath $exe)) { Fail "$archive has no gdt.exe" }
+        # Only the one expected file is taken out of the archive, to a path chosen here, so
+        # nothing in the archive decides where anything is written. Entry names use '/' or,
+        # in archives made by Windows PowerShell 5.1, '\'.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $exe = Join-Path $tmp 'gdt.exe'
+        $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $tmp $archive))
+        try {
+            $entry = $zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq "$name/gdt.exe" } | Select-Object -First 1
+            if (-not $entry) { Fail "$archive has no gdt.exe" }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $exe, $true)
+        } finally { $zip.Dispose() }
 
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $final = Join-Path $InstallDir 'gdt.exe'
-        try { Copy-Item -LiteralPath $exe -Destination $final -Force }
-        catch { Fail "could not write $final; if gdt is running, close it and try again ($($_.Exception.Message))" }
+        # Copy beside the final name, then rename, so a failed copy never leaves half a gdt.exe.
+        $staged = Join-Path $InstallDir (".gdt.new." + [Guid]::NewGuid().ToString('N'))
+        try {
+            Copy-Item -LiteralPath $exe -Destination $staged -Force
+            Move-Item -LiteralPath $staged -Destination $final -Force
+        } catch {
+            Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+            Fail "could not write $final; if gdt is running, close it and try again ($($_.Exception.Message))"
+        }
 
-        $installed = (& $final --version 2>$null)
+        # Asking for the version is only a courtesy; whatever it does must not undo a finished install
+        # (Windows PowerShell 5.1 raises an error for a program's stderr while 'Stop' is set).
+        $installed = try { & $final --version 2>$null } catch { $null }
+        if (-not $installed) { $installed = 'gdt' }
         Write-Host "Installed $installed in $InstallDir"
 
         $onPath = $false

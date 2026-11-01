@@ -53,6 +53,8 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - `gdt test` stops if it cannot delete the previous JUnit report, instead of reading an old result as the new one.
 - A tag, branch or commit for an addon (`@ref`, `ref =`) may only have letters, digits and `. _ - + /` (no `..`), so it cannot change the GitHub API URL it is put into.
 - On Windows, archive entries whose names Windows would not create as written (a device such as `nul` or `aux.txt`, a hidden `:stream`, a trailing dot or space) are refused.
+- The installers check the download against the release's `SHA256SUMS`, which shows the file is intact; it does not show where it was built. That is what `--verify-attestation` (`-VerifyAttestation`) adds, now strictly: it needs the attestation of this repository's release workflow, for the version being installed, from a GitHub-hosted runner. A `GDT_BASE_URL` that is not `https://` is warned about.
+- `install.ps1` takes the one expected file out of the archive, to a path of its own, instead of unpacking everything; it replaces `gdt.exe` through a staged copy and a rename; and `-VerifyAttestation` no longer fails on Windows PowerShell 5.1 when `gh` writes to stderr.
 
 ### Known limitations
 
