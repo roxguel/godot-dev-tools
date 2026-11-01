@@ -308,7 +308,7 @@ dependencies = [
 
 [[package]]
 name = "gdt"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -347,7 +347,7 @@ dependencies = [
 
 [[package]]
 name = "godot-dev-tools"
-version = "0.0.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "log",
  "serde",
