@@ -47,6 +47,10 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - `-v` and `-vv` mask `Authorization` headers, GitHub tokens and the value of `GH_TOKEN`/`GITHUB_TOKEN` before printing.
 - Downloads are verified against published checksums before use; a cached release list that cannot be read is discarded. A cached addon archive is checked again on every use when a checksum is published, and cache file names include a digest of the URL so two sources cannot share one.
 - Downloads are HTTPS only (redirects included), and a store's `download_url` over plain HTTP is refused. A download is capped at 1 GiB, and an archive that unpacks to more than 8 GiB or 200,000 entries is refused, so a hostile addon cannot fill the disk.
+- A project made with Godot 3 or older (`config_version` below 5 in `project.godot`) is no longer opened with the default Godot 4, which would convert and rewrite it; choose a build explicitly with `--godot` or `gdt.toml` if you want that.
+- `gdt run` on Linux and macOS replaces itself with Godot, so signals sent to it, the terminal and the exit code are Godot's own. `gdt test` reports a Godot that a signal ended as `128 + N`, as a shell does.
+- On Windows, gdt starts `powershell.exe` and `explorer.exe` by their full path under the Windows folder, not by name, so a copy in the current folder or next to gdt is not run in their place.
+- `gdt test` stops if it cannot delete the previous JUnit report, instead of reading an old result as the new one.
 
 ### Known limitations
 

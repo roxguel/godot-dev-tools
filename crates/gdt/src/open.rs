@@ -89,7 +89,7 @@ pub fn open_place(place: Place, dirs: &Dirs) -> Result<PathBuf> {
     log::debug!("opening with {program} {args:?}");
     // File managers often exit with a non-zero status even when they worked
     // (Explorer does), so only a failure to start is an error.
-    Command::new(&program)
+    Command::new(crate::system::file_manager(&program))
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

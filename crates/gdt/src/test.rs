@@ -120,7 +120,16 @@ pub fn test(args: &TestArgs, ctx: &Ctx) -> Result<()> {
         if let Some(dir) = report.parent() {
             fs::create_dir_all(dir).context("could not create the report folder")?;
         }
-        let _ = fs::remove_file(report);
+        // An old report left behind would be read as this run's result.
+        match fs::remove_file(report) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("could not delete the previous report {}", report.display())
+                });
+            }
+        }
     }
 
     ctx.info(format!(
@@ -135,7 +144,7 @@ pub fn test(args: &TestArgs, ctx: &Ctx) -> Result<()> {
         .current_dir(&root.dir)
         .status()
         .with_context(|| format!("could not start {}", executable.display()))?;
-    let code = status.code().unwrap_or(1);
+    let code = crate::system::exit_code(status);
 
     let report_text = plan
         .report

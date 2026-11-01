@@ -28,6 +28,11 @@ pub enum ResolveError {
         "Godot {spec} is required by {from}, but it is not installed; run `gdt install {spec}`"
     )]
     NotInstalled { spec: String, from: Source },
+    /// The project was made with Godot 3 or older.
+    #[error(
+        "{path} was made with Godot 3 or older (config_version={config_version}); gdt manages Godot 4, and opening it with Godot 4 would convert and rewrite its files. If you really want that, say so with --godot or `[godot] version` in gdt.toml"
+    )]
+    LegacyProject { path: String, config_version: u32 },
     /// Nothing asked for a version and there is no default.
     #[error(
         "no Godot build is selected; install one with `gdt install latest`, or choose one with `gdt use <version>`"
@@ -174,6 +179,14 @@ pub fn resolve(
                     &format!("{major}.{minor}{flavor}"),
                     Source::ProjectFile(path.clone()),
                 );
+            }
+            // No engine line: Godot 3 projects never had one, and the default
+            // engine is a 4.x that would convert them.
+            if let Some(config_version) = features.config_version.filter(|v| *v < 5) {
+                return Err(ResolveError::LegacyProject {
+                    path: path.display().to_string(),
+                    config_version,
+                });
             }
         }
     }
@@ -368,6 +381,55 @@ mod tests {
         .unwrap();
         let r = resolve(&request, &installed(), &config(None)).unwrap();
         assert_eq!(r.build, build("4.7.2-mono"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_godot_3_project_is_not_opened_with_the_default_4() {
+        let dir = scratch("resolve-godot3");
+        fs::write(
+            dir.join(PROJECT_FILE),
+            "; Engine configuration file.\nconfig_version=4\n\n[application]\nconfig/name=\"Old\"\n",
+        )
+        .unwrap();
+        let root = find_project_root(&dir).unwrap();
+        let request = Request {
+            project: Some(&root),
+            ..none()
+        };
+        let err = resolve(&request, &installed(), &config(Some("4.7.2"))).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ResolveError::LegacyProject {
+                    config_version: 4,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("--godot"));
+
+        // Saying which build to use is still allowed.
+        let request = Request {
+            flag: Some("4.6"),
+            project: Some(&root),
+            ..none()
+        };
+        assert!(resolve(&request, &installed(), &config(None)).is_ok());
+
+        // A Godot 4 project without a recorded engine line keeps the default.
+        fs::write(dir.join(PROJECT_FILE), "config_version=5\n").unwrap();
+        let request = Request {
+            project: Some(&root),
+            ..none()
+        };
+        assert_eq!(
+            resolve(&request, &installed(), &config(Some("4.7.2")))
+                .unwrap()
+                .source,
+            Source::Default
+        );
         let _ = fs::remove_dir_all(dir);
     }
 
