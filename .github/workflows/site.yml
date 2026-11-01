@@ -57,6 +57,15 @@ jobs:
         working-directory: site
         run: pnpm build
 
+      # `curl | sh` runs what is served at /install.sh, and the build runs code from npm
+      # packages that can write to dist/. The installers must leave the build exactly as
+      # they are in site/public/, where they are reviewed.
+      - name: Check that the build did not change the installers
+        run: |
+          for file in install.sh install.ps1; do
+            cmp "site/public/$file" "site/dist/$file" || { echo "::error::site/dist/$file differs from site/public/$file"; exit 1; }
+          done
+
       - name: Package for GitHub Pages
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
