@@ -17,4 +17,4 @@ Order matters: the first milestones remove the day-to-day pain in the first cons
 | **M8 Upgrade** | `gdt upgrade` to move a project to another engine version using Godot's own conversion and re-import | Researched in [open-questions.md](open-questions.md) first |
 | **Later** | `gdt init`, `doctor`, `config`, `cache`, `completions`, `auth` (Store sign-in), `engine info`, URL and path addon sources, export templates, GUI, editor plugin | |
 
-macOS is a target from M0 (compiled and unit-tested in CI) but is not exercised manually until someone with a Mac can.
+macOS and the arm64 builds are targets from M0 (compiled and unit-tested in CI) but are not exercised manually until someone with the hardware can.

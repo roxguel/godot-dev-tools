@@ -1,6 +1,6 @@
 # Godot Development Tools
 
-> **Status: first release (0.1.0).** The version manager, the `godot` shim, the addon manager and the test runner work today and are tested on Windows. Linux and macOS are compiled and unit-tested in CI but not yet exercised by hand.
+> **Status: first release (0.1.0).** The version manager, the `godot` shim, the addon manager and the test runner work today and are tested by hand on Windows and on Linux (x86_64, Ubuntu 24.04 and elementary OS 8). macOS and the arm64 builds are compiled and unit-tested in CI but not yet exercised by hand.
 
 One cross-platform tool for working in a Godot ecosystem. The command is `gdt`.
 
@@ -122,7 +122,7 @@ This project is developed with the help of AI coding assistants (Claude Code). E
 
 ## Platforms
 
-Windows, Linux and macOS (x86_64 and arm64) are the targets. Development and manual testing happen on Windows; Linux and macOS builds and unit tests come from CI.
+Windows, Linux and macOS (x86_64 and arm64) are the targets. Development and manual testing happen on Windows and Linux (x86_64); macOS and the arm64 builds are compiled and unit-tested in CI.
 
 ## Not affiliated
 

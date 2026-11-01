@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Until 1.0, a minor version can change the command line or the project files; the changes are listed here.
 
+## [Unreleased]
+
+### Fixed
+
+- An error whose message already contains its cause (for example a symbolic link where gdt needs a folder) is no longer printed with the cause twice.
+
+### Changed
+
+- The documentation says that Linux (x86_64) has been tried by hand.
+
 ## [0.1.0] - 2026-11-01
 
 First release: a version manager, a `godot` shim, an addon manager and a test runner for Godot 4, in one command, `gdt`.
@@ -63,4 +73,5 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - The Windows binaries are not code-signed, so SmartScreen can warn on the first run.
 - Not available yet: addon sources by URL or local path, signing in to the Asset Store (paid assets), `gdt init`, `doctor`, `config`, `cache`, `completions`, `self-update` and `gdt upgrade`. See [the roadmap](docs/roadmap.md).
 
+[Unreleased]: https://github.com/roxguel/godot-dev-tools/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/roxguel/godot-dev-tools/releases/tag/v0.1.0
