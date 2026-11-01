@@ -4,7 +4,8 @@ name: Release
 # matches the version in Cargo.toml, and publishes a GitHub release with the
 # archives, a SHA256SUMS file and build provenance attestations. A tag without a
 # hyphen (not a pre-release) is then also published to crates.io, after a second
-# approval of the `release` environment.
+# approval of the `release` environment, and pull requests update the Homebrew tap
+# and the Scoop bucket.
 #
 # A pull request that changes this file, or a manual run, builds everything and
 # publishes nothing: that is how the workflow itself is tested.
@@ -236,3 +237,62 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: cargo publish --workspace --locked
+
+  # Opens a pull request in the Homebrew tap and in the Scoop bucket with the new
+  # version. The pull requests are merged by the maintainer, and the token that opens
+  # them only reaches those two repositories (see packaging/README.md). Without the
+  # secret the job warns and does nothing.
+  packaging:
+    name: Update the tap and the bucket
+    needs: publish
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Render the manifests from the release's SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS
+          node packaging/render.mjs "$version" SHA256SUMS out "$(date -u +%F)"
+
+      - name: Open the pull requests
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGING_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::PACKAGING_TOKEN is not set: the tap and the bucket were not updated"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          update() { # repository, rendered file, path inside the repository
+            local repo="$1" source="$2" target="$3" branch="gdt-$version"
+            gh repo clone "roxguel/$repo" "work/$repo" -- --depth 1
+            (
+              cd "work/$repo"
+              git switch -c "$branch"
+              mkdir -p "$(dirname "$target")"
+              cp "$GITHUB_WORKSPACE/out/$source" "$target"
+              if [[ -z "$(git status --porcelain -- "$target")" ]]; then
+                echo "$repo is already at gdt $version"
+                exit 0
+              fi
+              git add "$target"
+              git commit -m "feat(gdt): update to $version"
+              git push origin "$branch"
+              gh pr create --repo "roxguel/$repo" --base main --head "$branch"                 --title "feat(gdt): update to $version"                 --body "gdt $version, rendered from the SHA256SUMS of https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            )
+          }
+          update homebrew-tap homebrew/gdt.rb Formula/gdt.rb
+          update scoop-bucket scoop/gdt.json bucket/gdt.json
