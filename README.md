@@ -26,7 +26,11 @@ Windows (PowerShell):
 irm https://gdt.roxguel.dev/install.ps1 | iex
 ```
 
-The installers check the download against the release's `SHA256SUMS` and change nothing but the `gdt` executable; [read them](https://gdt.roxguel.dev/install/) first if you prefer. Archives, checksums and build attestations are also on the [releases page](https://github.com/roxguel/godot-dev-tools/releases) ([how to verify them](https://gdt.roxguel.dev/installation/verify/)). Or build from source with a [Rust toolchain](https://rustup.rs) (1.85 or newer):
+The installers check the download against the release's `SHA256SUMS` and change nothing but the `gdt` executable; [read them](https://gdt.roxguel.dev/install/) first if you prefer. Archives, checksums and build attestations are also on the [releases page](https://github.com/roxguel/godot-dev-tools/releases) ([how to verify them](https://gdt.roxguel.dev/installation/verify/)). With a [Rust toolchain](https://rustup.rs) (1.85 or newer) you can also install it from [crates.io](https://crates.io/crates/gdt), or build it from source:
+
+```bash
+cargo install gdt --locked
+```
 
 ```bash
 git clone https://github.com/roxguel/godot-dev-tools

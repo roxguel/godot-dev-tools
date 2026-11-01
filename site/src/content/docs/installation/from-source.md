@@ -5,6 +5,14 @@ description: Build and install gdt with a Rust toolchain.
 
 You need a [Rust toolchain](https://rustup.rs), version 1.85 or newer.
 
+The quickest way is [crates.io](https://crates.io/crates/gdt), which builds the released version:
+
+```sh
+cargo install gdt --locked
+```
+
+To build the repository instead:
+
 ```sh
 git clone https://github.com/roxguel/godot-dev-tools
 cd godot-dev-tools
