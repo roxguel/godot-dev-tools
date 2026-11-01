@@ -2,7 +2,9 @@ name: Release
 
 # Pushing a tag such as v0.1.0 builds gdt for six targets, checks that the tag
 # matches the version in Cargo.toml, and publishes a GitHub release with the
-# archives, a SHA256SUMS file and build provenance attestations.
+# archives, a SHA256SUMS file and build provenance attestations. A tag without a
+# hyphen (not a pre-release) is then also published to crates.io, after a second
+# approval of the `release` environment.
 #
 # A pull request that changes this file, or a manual run, builds everything and
 # publishes nothing: that is how the workflow itself is tested.
@@ -203,3 +205,34 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "gdt ${GITHUB_REF_NAME#v}" \
             "${flags[@]}"
+
+  # crates.io trusted publishing: crates.io checks the OIDC token of this run (the
+  # repository, this workflow file and the `release` environment, as registered on each
+  # crate's settings page) and hands out a token that lasts a few minutes, so no secret
+  # is stored. A pre-release tag is not published there. This job is its own approval of
+  # the `release` environment, and it can be re-run alone if it fails.
+  crates:
+    name: Publish to crates.io
+    needs: publish
+    if: github.ref_type == 'tag' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # prove to crates.io that this run is the registered workflow
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+
+      - name: Publish both crates, the library first
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --workspace --locked
