@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Every release archive includes `THIRD-PARTY-NOTICES.txt`, with the copyright notice and license text of each library gdt is built with.
+- The crates published on crates.io include `LICENSE-MIT` and `LICENSE-APACHE`.
 - gdt is on [crates.io](https://crates.io/crates/gdt) (`cargo install gdt --locked`), together with its library crate `godot-dev-tools`. Stable releases are published there by the release workflow, with crates.io trusted publishing and no stored token.
 
 ### Fixed
