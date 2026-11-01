@@ -1,6 +1,6 @@
 # Godot Development Tools
 
-> **Status: pre-release.** The version manager, the `godot` shim, the addon manager and the test runner work today and are tested on Windows. No release has been published yet: build it from source (below). Linux and macOS are compiled and unit-tested in CI but not yet exercised by hand.
+> **Status: first release (0.1.0).** The version manager, the `godot` shim, the addon manager and the test runner work today and are tested on Windows. Linux and macOS are compiled and unit-tested in CI but not yet exercised by hand.
 
 One cross-platform tool for working in a Godot ecosystem. The command is `gdt`.
 
@@ -14,7 +14,19 @@ Opening a project with the wrong Godot version silently upgrades its files. Runn
 
 ## Install
 
-There are no binaries to download yet. With a [Rust toolchain](https://rustup.rs) (1.85 or newer):
+Linux and macOS:
+
+```bash
+curl -fsSL https://gdt.roxguel.dev/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://gdt.roxguel.dev/install.ps1 | iex
+```
+
+The installers check the download against the release's `SHA256SUMS` and change nothing but the `gdt` executable; [read them](https://gdt.roxguel.dev/install/) first if you prefer. Archives, checksums and build attestations are also on the [releases page](https://github.com/roxguel/godot-dev-tools/releases) ([how to verify them](https://gdt.roxguel.dev/installation/verify/)). Or build from source with a [Rust toolchain](https://rustup.rs) (1.85 or newer):
 
 ```bash
 git clone https://github.com/roxguel/godot-dev-tools
@@ -22,7 +34,7 @@ cd godot-dev-tools
 cargo install --path crates/gdt --locked
 ```
 
-This puts `gdt` in Cargo's bin folder. Release binaries for Windows, Linux and macOS (x86_64 and arm64), with checksums, will be attached to GitHub releases.
+This puts `gdt` in Cargo's bin folder.
 
 ## A taste
 

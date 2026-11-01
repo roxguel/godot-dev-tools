@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Until 1.0, a minor version can change the command line or the project files; the changes are listed here.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-11-01
 
 First release: a version manager, a `godot` shim, an addon manager and a test runner for Godot 4, in one command, `gdt`.
 

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. The project is pre-release: the core works, and the most useful contributions right now are bug reports, testing on Linux and macOS, feedback on the documents in [`docs/`](docs/README.md) and answers to the items in [`docs/open-questions.md`](docs/open-questions.md).
+Thanks for your interest. The project is young: the core works, and the most useful contributions right now are bug reports, testing on Linux and macOS, feedback on the documents in [`docs/`](docs/README.md) and answers to the items in [`docs/open-questions.md`](docs/open-questions.md).
 
 ## Workflow
 
