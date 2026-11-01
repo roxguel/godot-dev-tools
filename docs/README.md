@@ -6,6 +6,8 @@ Every document declares its status at the top: `Draft`, `Accepted`, `Implemented
 |---|---|
 | [vision.md](vision.md) | Goals, non-goals, principles, personas |
 | [roadmap.md](roadmap.md) | Milestones in order |
+| [releasing.md](releasing.md) | How a version is released, checked and recovered |
+| [maintainers.md](maintainers.md) | The settings outside the code: branch and tag rules, environments, crates.io, package managers |
 | [open-questions.md](open-questions.md) | Things still to research or decide |
 | [specs/cli.md](specs/cli.md) | Command surface |
 | [specs/version-management.md](specs/version-management.md) | Installing Godot builds, resolving which one to use, the shim |

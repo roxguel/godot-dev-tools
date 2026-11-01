@@ -28,7 +28,7 @@ const generated = ['reference', 'specs', 'adr', 'project', 'security.md', 'chang
 
 /** Order of the spec pages in the sidebar. */
 const specOrder = ['version-management', 'addons', 'testing', 'authentication'];
-const projectOrder = ['vision', 'roadmap', 'open-questions'];
+const projectOrder = ['vision', 'roadmap', 'open-questions', 'releasing', 'maintainers'];
 
 /** @type {{ source: string, route: string, order?: number }[]} */
 const pages = [];
