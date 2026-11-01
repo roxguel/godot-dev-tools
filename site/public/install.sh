@@ -18,6 +18,8 @@
 #   -h, --help            show this text
 #
 # GDT_BASE_URL replaces https://github.com/roxguel/godot-dev-tools (for mirrors and tests).
+# It also lifts the HTTPS-only rule that curl otherwise follows, and a plain http://
+# address is warned about; with a mirror, trust --verify-attestation, not the transport.
 
 set -eu
 
@@ -60,6 +62,8 @@ download() { # url file
         # shellcheck disable=SC2046
         curl -fsSL $(proto_curl) -o "$2" "$1" || fail "could not download $1"
     elif have wget; then
+        # wget cannot be told to refuse http:// redirects; the GitHub addresses used
+        # by default are https and redirect only to https. Prefer curl where there is one.
         wget -q -O "$2" "$1" || fail "could not download $1"
     else
         fail "curl or wget is needed"
@@ -140,6 +144,13 @@ main() {
         esac
     done
 
+    case "$REPO_URL" in
+        https://*) ;;
+        *)
+            printf 'gdt installer: warning: %s is not an https:// address, so the download is not protected in transit. Only --verify-attestation says where the file was built.\n' "$REPO_URL" >&2
+            ;;
+    esac
+
     if [ -z "$dir" ]; then
         [ -n "${HOME:-}" ] || fail "HOME is not set; say where to install with --dir"
         dir="$HOME/.local/bin"
@@ -180,9 +191,16 @@ main() {
 
     if [ "$verify_attestation" = 1 ]; then
         have gh || fail "--verify-attestation needs the GitHub CLI (gh)"
-        gh attestation verify "$tmp/$archive" --repo "$REPO_SLUG" >/dev/null \
-            || fail "the build provenance of $archive could not be verified; nothing was installed"
+        # Not any attestation of the repository: the one that this repository's release
+        # workflow made, on a GitHub-hosted runner, for this very tag.
+        gh attestation verify "$tmp/$archive" --repo "$REPO_SLUG" \
+            --signer-workflow "$REPO_SLUG/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$tag" \
+            --deny-self-hosted-runners >/dev/null \
+            || fail "the build provenance of $archive could not be verified (it needs a recent GitHub CLI, signed in); nothing was installed"
         say "Build provenance ok"
+    else
+        say "(The checksum shows the download is intact. --verify-attestation also shows where it was built.)"
     fi
 
     tar -xzf "$tmp/$archive" -C "$tmp" "$name/gdt" || fail "could not unpack $archive"
