@@ -33,6 +33,13 @@ pnpm dev        # or: pnpm build && pnpm preview
 
 By contributing you agree that your work is licensed under `MIT OR Apache-2.0`, as stated in the README.
 
+A new dependency must use a license listed in `deny.toml` (`cargo deny check` in CI) and in `about.toml`. The release workflow runs [cargo-about](https://github.com/EmbarkStudios/cargo-about) and puts `THIRD-PARTY-NOTICES.txt`, with the license of every library in the binary, in each archive. To see it:
+
+```bash
+cargo install cargo-about --version 0.9.2 --locked --features cli
+cargo about generate --locked --fail -m crates/gdt/Cargo.toml -c about.toml -o THIRD-PARTY-NOTICES.txt about.hbs
+```
+
 ## Trademark
 
 Do not use the Godot logo in this project. The word "Godot" is used only to describe what the tool works with, per the Godot Foundation's trademark policy.
