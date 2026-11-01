@@ -1,8 +1,12 @@
 class Gdt < Formula
-  desc "Godot Development Tools: version manager, addon manager and test runner for Godot"
+  desc "Version manager, addon manager and test runner for Godot"
   homepage "https://gdt.roxguel.dev"
-  version "0.1.0"
   license any_of: ["MIT", "Apache-2.0"]
+
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   on_macos do
     on_arm do
@@ -24,11 +28,6 @@ class Gdt < Formula
       url "https://github.com/roxguel/godot-dev-tools/releases/download/v0.1.0/gdt-v0.1.0-x86_64-unknown-linux-musl.tar.gz"
       sha256 "8866aa18ac2404711835cb031a568499ff4e65eb16d06f6e3ee06eacf241204e"
     end
-  end
-
-  livecheck do
-    url :stable
-    strategy :github_latest
   end
 
   def install
