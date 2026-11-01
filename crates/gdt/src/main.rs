@@ -227,10 +227,24 @@ fn main() -> ExitCode {
             if let Some(ExitWith(code)) = error.downcast_ref::<ExitWith>() {
                 std::process::exit(*code);
             }
-            eprintln!("Error: {error:#}");
+            eprintln!("Error: {}", error_message(&error));
             ExitCode::from(exit_code(&error))
         }
     }
+}
+
+/// The error and its causes on one line. Many library errors already put their source
+/// in their own message, so a cause whose text is already there is not repeated.
+fn error_message(error: &anyhow::Error) -> String {
+    let mut message = error.to_string();
+    for cause in error.chain().skip(1) {
+        let cause = cause.to_string();
+        if !message.contains(&cause) {
+            message.push_str(": ");
+            message.push_str(&cause);
+        }
+    }
+    message
 }
 
 /// The documented exit code for an error (see docs/specs/cli.md).
@@ -493,4 +507,45 @@ fn make_default_if_none(dirs: &Dirs, build: &Build, ctx: &Ctx) -> Result<bool> {
     config.save(&path)?;
     ctx.info(format!("Godot {build} is now the default engine"));
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Like the library's errors: the source is also in the message.
+    #[derive(Debug)]
+    struct WithSource {
+        source: std::io::Error,
+    }
+
+    impl fmt::Display for WithSource {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "could not use the folder: {}", self.source)
+        }
+    }
+
+    impl std::error::Error for WithSource {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.source)
+        }
+    }
+
+    #[test]
+    fn a_cause_already_in_the_message_is_not_repeated() {
+        let error = anyhow::Error::new(WithSource {
+            source: std::io::Error::other("it is a link"),
+        });
+        assert_eq!(
+            error_message(&error),
+            "could not use the folder: it is a link"
+        );
+    }
+
+    #[test]
+    fn a_cause_that_is_not_in_the_message_is_added() {
+        let error =
+            anyhow::Error::new(std::io::Error::other("disk full")).context("could not save");
+        assert_eq!(error_message(&error), "could not save: disk full");
+    }
 }
