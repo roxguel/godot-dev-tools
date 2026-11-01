@@ -22,6 +22,8 @@ if (!/^\d+\.\d+\.\d+$/.test(version)) {
 
 const REPO = "roxguel/godot-dev-tools";
 const DESCRIPTION = "Godot Development Tools: version manager, addon manager and test runner for Godot.";
+// Homebrew wants a description under 80 characters that does not start with the name.
+const BREW_DESCRIPTION = "Version manager, addon manager and test runner for Godot";
 const base = `https://github.com/${REPO}/releases/download/v${version}`;
 
 // The archive of each target, with the SHA-256 the release published for it.
@@ -148,10 +150,14 @@ const brewSource = (target) => {
   return `url "${url(file)}"\n      sha256 "${sha(file)}"`;
 };
 write("homebrew", "gdt.rb", `class Gdt < Formula
-  desc "Godot Development Tools: version manager, addon manager and test runner for Godot"
+  desc "${BREW_DESCRIPTION}"
   homepage "https://gdt.roxguel.dev"
-  version "${version}"
   license any_of: ["MIT", "Apache-2.0"]
+
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   on_macos do
     on_arm do
@@ -169,11 +175,6 @@ write("homebrew", "gdt.rb", `class Gdt < Formula
     on_intel do
       ${brewSource("x86_64-unknown-linux-musl")}
     end
-  end
-
-  livecheck do
-    url :stable
-    strategy :github_latest
   end
 
   def install
