@@ -83,7 +83,7 @@ paths = ["test"]
 
 | Variable | Effect |
 |---|---|
-| `GDT_HOME` | Keep everything `gdt` stores in this folder instead of the platform's standard directories (`gdt paths` shows where) |
+| `GDT_HOME` | Keep everything `gdt` stores in this folder instead of the platform's standard directories (`gdt paths` shows where). It must be an absolute path: a relative one, such as `~/.gdt` in quotes, is an error |
 | `GDT_VERSION` | Use this installed build for the command, over the project |
 | `GITHUB_TOKEN` or `GH_TOKEN` | Raise the GitHub API rate limit and reach private repositories. Sent only to `api.github.com` and never printed |
 | `NO_COLOR` | No colors, as `--color never` |

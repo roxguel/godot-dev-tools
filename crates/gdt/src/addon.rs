@@ -822,7 +822,7 @@ fn update(project: &Project, ctx: &Ctx, args: &UpdateArgs) -> Result<()> {
             &pinned,
             entry.subdir.as_deref(),
             Some(&name),
-            true,
+            replace_on_update(current.is_some(), args.force),
             &mut progress,
         )?;
         let from = current
@@ -840,6 +840,14 @@ fn update(project: &Project, ctx: &Ctx, args: &UpdateArgs) -> Result<()> {
     }
     project.update_gitignore(manifest.git_mode, &lock)?;
     Ok(())
+}
+
+/// Whether `update` may replace an existing `addons/<name>`. With a lock entry the
+/// folder was checked against it just before; without one there is nothing to
+/// compare with, so what is there may be the user's own work and only `--force`
+/// replaces it.
+fn replace_on_update(has_lock_entry: bool, force: bool) -> bool {
+    has_lock_entry || force
 }
 
 /// `gdt addon search`: works anywhere; inside a project it prefers what works
@@ -942,5 +950,13 @@ mod tests {
             assert!(error.downcast_ref::<UsageError>().is_some(), "{g} {s} {l}");
             assert!(error.to_string().contains("[addons.x]"));
         }
+    }
+
+    #[test]
+    fn update_replaces_an_unlocked_folder_only_with_force() {
+        assert!(replace_on_update(true, false), "checked against the lock");
+        assert!(replace_on_update(true, true));
+        assert!(!replace_on_update(false, false), "nothing to compare with");
+        assert!(replace_on_update(false, true));
     }
 }

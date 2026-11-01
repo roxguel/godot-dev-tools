@@ -93,10 +93,14 @@ pub fn find_project_root(start: &Path) -> Option<ProjectRoot> {
 
 /// The folder given with Godot's `--path` flag (`--path <dir>` or `--path=<dir>`),
 /// if the arguments have one. This is how a project is found when Godot is
-/// started from another folder.
+/// started from another folder. Arguments after a bare `--` belong to the script,
+/// not to Godot, so they are not looked at.
 pub fn godot_path_arg<S: AsRef<std::ffi::OsStr>>(args: &[S]) -> Option<PathBuf> {
     let mut iter = args.iter().map(AsRef::as_ref);
     while let Some(arg) = iter.next() {
+        if arg == "--" {
+            return None;
+        }
         if arg == "--path" {
             return iter.next().map(PathBuf::from);
         }
@@ -414,6 +418,24 @@ mod tests {
         );
         assert_eq!(godot_path_arg(&v(&["-s", "x.gd"])), None);
         assert_eq!(godot_path_arg(&v(&["--path"])), None);
+        // After a bare `--` the arguments are the script's, not Godot's.
+        assert_eq!(
+            godot_path_arg(&v(&[
+                "--headless",
+                "-s",
+                "t.gd",
+                "--",
+                "--path",
+                "../other"
+            ])),
+            None
+        );
+        assert_eq!(
+            godot_path_arg(&v(&[
+                "--path", "p", "-s", "t.gd", "--", "--path", "../other"
+            ])),
+            Some(PathBuf::from("p"))
+        );
         // Works on raw OS arguments too, which is what the shim receives.
         let os = [
             std::ffi::OsString::from("--path"),

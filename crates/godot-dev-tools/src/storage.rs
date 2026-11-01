@@ -7,7 +7,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::version::Build;
 
@@ -18,6 +18,22 @@ const APP_DIR: &str = "gdt";
 pub enum StorageError {
     #[error("the environment variable {0} is not set; set it or set GDT_HOME")]
     MissingEnv(&'static str),
+    #[error(
+        "the environment variable {key} must be an absolute path, but it is `{value}` (a `~` inside quotes is not expanded by the shell)"
+    )]
+    NotAbsolute { key: &'static str, value: String },
+}
+
+/// Whether `path` starts at a root, whichever platform it was written for: a
+/// relative directory would point somewhere else in every folder gdt runs from,
+/// and gdt runs programs it finds there.
+fn is_rooted(path: &Path) -> bool {
+    let text = path.to_string_lossy();
+    path.is_absolute()
+        || matches!(
+            text.as_bytes(),
+            [b'/' | b'\\', ..] | [b'A'..=b'Z' | b'a'..=b'z', b':', b'/' | b'\\', ..]
+        )
 }
 
 /// The operating system family, which decides the directory conventions.
@@ -62,9 +78,24 @@ impl Dirs {
         env: impl Fn(&str) -> Option<OsString>,
     ) -> Result<Self, StorageError> {
         let var = |key: &str| env(key).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let required = |key: &'static str| var(key).ok_or(StorageError::MissingEnv(key));
+        let rooted = |key: &'static str, path: PathBuf| {
+            if is_rooted(&path) {
+                Ok(path)
+            } else {
+                Err(StorageError::NotAbsolute {
+                    key,
+                    value: path.display().to_string(),
+                })
+            }
+        };
+        let required = |key: &'static str| {
+            var(key)
+                .ok_or(StorageError::MissingEnv(key))
+                .and_then(|path| rooted(key, path))
+        };
 
         if let Some(root) = var("GDT_HOME") {
+            let root = rooted("GDT_HOME", root)?;
             return Ok(Self {
                 data: root.clone(),
                 config: root,
@@ -259,6 +290,46 @@ mod tests {
             let d = Dirs::resolve(platform, env(&[("GDT_HOME", "/opt/gdt")])).unwrap();
             assert_eq!(d.data_dir(), PathBuf::from("/opt/gdt"));
             assert_eq!(d.config_dir(), PathBuf::from("/opt/gdt"));
+        }
+    }
+
+    #[test]
+    fn relative_roots_are_refused_by_name() {
+        // `"~/.gdt"` in quotes reaches gdt as the literal, relative text.
+        for relative in ["~/.gdt", ".gdt", "gdt-home", "..\\x", "a/b"] {
+            for platform in [Platform::Windows, Platform::Linux, Platform::MacOs] {
+                assert_eq!(
+                    Dirs::resolve(platform, env(&[("GDT_HOME", relative)])),
+                    Err(StorageError::NotAbsolute {
+                        key: "GDT_HOME",
+                        value: relative.to_string()
+                    }),
+                    "{relative:?}"
+                );
+            }
+        }
+        let relative_home = |platform, key| {
+            Dirs::resolve(platform, env(&[(key, "home"), ("LOCALAPPDATA", "C:\\L")]))
+        };
+        assert!(matches!(
+            relative_home(Platform::Linux, "HOME"),
+            Err(StorageError::NotAbsolute { key: "HOME", .. })
+        ));
+        assert!(matches!(
+            relative_home(Platform::MacOs, "HOME"),
+            Err(StorageError::NotAbsolute { key: "HOME", .. })
+        ));
+        assert!(matches!(
+            relative_home(Platform::Windows, "APPDATA"),
+            Err(StorageError::NotAbsolute { key: "APPDATA", .. })
+        ));
+    }
+
+    #[test]
+    fn rooted_paths_of_either_style_are_accepted() {
+        for ok in ["/opt/gdt", "C:\\gdt", "c:/gdt", "\\\\server\\share\\gdt"] {
+            let d = Dirs::resolve(Platform::Linux, env(&[("GDT_HOME", ok)])).unwrap();
+            assert_eq!(d.data_dir(), PathBuf::from(ok), "{ok:?}");
         }
     }
 

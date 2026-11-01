@@ -41,6 +41,9 @@ First release: a version manager, a `godot` shim, an addon manager and a test ru
 - Addon names and folders that come from `gdt.toml`, `gdt.lock` or the command line are validated, so none of them can read, write or delete outside `addons/`. A key that gdt does not know in `gdt.toml` is an error. Names may only have letters, digits, spaces, `.`, `_` and `-`.
 - Addon archives cannot contain symbolic links, and no archive entry is written through a link made by an earlier entry, so an archive cannot write outside the folder it is unpacked into.
 - gdt does not follow symbolic links for `addons/`, an addon folder, `gdt.toml`, `gdt.lock` or `.gitignore`, so a cloned project cannot make it read, write or delete elsewhere.
+- `GDT_HOME` (and `HOME`, `LOCALAPPDATA`, `APPDATA`) must be an absolute path; a relative one would make gdt look for, and run, Godot builds in whatever folder it is started from.
+- `gdt addon update` no longer replaces an existing addon folder that has no lock entry unless `--force` is given.
+- `--path` is not looked for after a bare `--` in `gdt run` and the `godot` shim, where the arguments belong to the script, so the project's version is chosen from the folder Godot really uses.
 - `-v` and `-vv` mask `Authorization` headers, GitHub tokens and the value of `GH_TOKEN`/`GITHUB_TOKEN` before printing.
 - Downloads are verified against published checksums before use; a cached release list that cannot be read is discarded.
 
