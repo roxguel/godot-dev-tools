@@ -1,5 +1,11 @@
 # Godot Development Tools
 
+[![CI](https://github.com/roxguel/godot-dev-tools/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/roxguel/godot-dev-tools/actions/workflows/ci.yml)
+[![Advisories](https://github.com/roxguel/godot-dev-tools/actions/workflows/advisories.yml/badge.svg?branch=main)](https://github.com/roxguel/godot-dev-tools/actions/workflows/advisories.yml)
+[![crates.io](https://img.shields.io/crates/v/gdt)](https://crates.io/crates/gdt)
+[![License](https://img.shields.io/crates/l/gdt)](#license)
+[![MSRV](https://img.shields.io/crates/msrv/gdt)](https://crates.io/crates/gdt)
+
 > **Status: first release (0.1.0).** The version manager, the `godot` shim, the addon manager and the test runner work today and are tested by hand on Windows and on Linux (x86_64, Ubuntu 24.04 and elementary OS 8). macOS and the arm64 builds are compiled and unit-tested in CI but not yet exercised by hand.
 
 One cross-platform tool for working in a Godot ecosystem. The command is `gdt`.
